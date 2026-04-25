@@ -1,31 +1,29 @@
 # ENSO-X
 
-ENSO-X 是一个面向 ENSO 长提前期预测的独立设计模型。模型以过去 12 个月的海洋和大气场作为输入，预测未来 24 个月的 Niño3.4 指数演变。
+ENSO-X is an independently designed model for long-lead ENSO prediction. It takes the previous 12 months of ocean-atmosphere fields as input and predicts the next 24 months of Niño3.4 evolution.
 
-英文版说明见 `README.en.md`。
+## Model Overview
 
-## 模型概述
+ENSO-X uses a hybrid spatiotemporal framework with three main parts:
 
-ENSO-X 采用混合时空预测框架，主要由三部分组成：
+- Field encoder branch  
+  Uses 3D CNN and Transformer blocks to extract large-scale spatiotemporal features.
+- Memory branch  
+  Uses seasonal state-space dynamics and a physically inspired dual-memory mechanism to represent recharge, wind forcing, and persistence.
+- Lead repair branch  
+  Uses local bridge, interpolation, and patch modules to repair difficult lead windows and improve long-lead stability.
 
-- 场编码分支  
-  使用 3D CNN 与 Transformer 提取大尺度海气场的时空特征。
-- 记忆分支  
-  结合季节状态空间与物理启发的双记忆机制，用于表征再充电过程、风场强迫和持续性效应。
-- lead 修复分支  
-  通过局部桥接、插值和 patch 模块，修复困难 lead 窗口并提升长 lead 预测稳定性。
+## Data Setup
 
-## 数据设置
+The current ENSO-X release uses the following setup:
 
-当前发布版 ENSO-X 的训练与评估设置如下：
+- Training: `GODAS 1980-2014`
+- Replay augmentation: `ORAS5 1980-2014`
+- Main validation: `GODAS 2015-2021`
+- External generalization test: `CMIP6 2015-2023`
+- Long-range extrapolation test: `CMIP6 2015-2100`
 
-- 训练集：`GODAS 1980-2014`
-- replay 增强：`ORAS5 1980-2014`
-- 主验证集：`GODAS 2015-2021`
-- 外部泛化测试：`CMIP6 2015-2023`
-- 长时段外推测试：`CMIP6 2015-2100`
-
-模型输入使用 9 个海气变量：
+The model uses 9 predictor variables:
 
 - `thetao_5`
 - `thetao_wmean`
@@ -37,60 +35,46 @@ ENSO-X 采用混合时空预测框架，主要由三部分组成：
 - `mlotst`
 - `sos`
 
-记忆分支使用 3 个派生记忆特征：
+The memory branch uses 3 derived features:
 
 - `wwv_proxy`
 - `trade_wind`
 - `sst_basin_mean`
 
-## 主要效果
+## Main Results
 
-当前发布的 ENSO-X checkpoint 在主设置下已经实现稳定的 24 个月预测能力：
+The released ENSO-X checkpoint achieves stable 24-month prediction skill in the main setting:
 
-- `24/24` 个 lead 月的 `corr > 0.5`
-- 最小月相关系数为 `0.5089`
-- 原本最困难的 `lead 9-11` 屏障段也已经整体修复到 `0.5` 以上
+- `24/24` lead months with `corr > 0.5`
 
-在外部 `CMIP6` 评估上：
+External CMIP6 evaluation:
 
-- `CMIP6 2015-2023`：前 `24` 个月保持 `corr > 0.5`，并且至少到 `48` 个月仍保持 `corr > 0.2`
-- `CMIP6 2015-2100`：当前 zero-shot 外推测试中，至少到 `48` 个月仍保持 `corr > 0.5`
+- `CMIP6 2015-2023`: `corr > 0.5` through the first 24 months, and at least `corr > 0.2` through 48 months
+- `CMIP6 2015-2100`: in the current zero-shot extrapolation test, `corr > 0.5` remains valid through at least 48 months
 
-当前发布版的实用结论可以概括为：
+## Repository Layout
 
-- 有效预测能力：`24` 个月
-- 保守外推能力：`48` 个月
+- `train.py`: training entry point
+- `src/ensox/`: ENSO-X core code
+- `configs/enso_x_24_final.yaml`: final reproducible training configuration
+- `preprocess/`: preprocessing scripts used by the released package
+- `scripts/evaluate_limit_enso_x.py`: long-range extrapolation evaluation
+- `scripts/run_train_enso_x.sh`: training launcher
+- `scripts/run_limit_eval_enso_x.sh`: extrapolation evaluation launcher
+- `checkpoints/`: checkpoint manifest and notes
+- `results/`: release result summaries
 
-## 仓库结构
+## Environment
 
-- `train.py`：训练入口
-- `src/ensox/`：ENSO-X 核心代码
-- `configs/enso_x_24_final.yaml`：最终可复现训练配置
-- `preprocess/`：当前发布版实际使用的预处理脚本
-- `scripts/evaluate_limit_enso_x.py`：长时段外推评估脚本
-- `scripts/run_train_enso_x.sh`：训练启动脚本
-- `scripts/run_limit_eval_enso_x.sh`：外推评估启动脚本
-- `checkpoints/`：checkpoint 清单与说明
-- `results/`：发布版结果摘要
+The repository keeps three environment references:
 
-## 环境
+- `requirements.txt`: minimal runtime dependencies
+- `requirements-preprocess.txt`: preprocessing dependencies
+- `environment.yml`: exported server environment used by the released package
 
-仓库中保留了三类环境说明：
+## Data Preparation
 
-- `requirements.txt`：最小运行依赖
-- `requirements-preprocess.txt`：预处理所需依赖
-- `environment.yml`：服务器发布环境导出的完整环境文件
-
-示例：
-
-```bash
-conda env create -f environment.yml
-conda activate enso_x
-```
-
-## 数据预处理
-
-ENSO-X 期望的处理后数据目录结构如下：
+ENSO-X expects processed data under:
 
 ```text
 data/ctefnet_data/
@@ -100,78 +84,51 @@ data/ctefnet_data/
     ORAS5/
 ```
 
-`preprocess/` 目录中保留的是与当前发布版数据产物相匹配的脚本：
+Preprocessing converts raw CMIP6, GODAS, and ORAS5 fields into the normalized `npz` layout used by ENSO-X. The kept scripts are:
 
 - `preprocess_cmip6_to_ensox.py`
 - `preprocess_godas_to_ensox.py`
 - `preprocess_oras5_to_ensox.py`
 
-`preprocess/README.md` 中已经补充了：
+CMIP6 data should follow the model list in Table S1, excluding the two missing models. The released package uses the following available CMIP6 models:
 
-- 原始数据目录布局
-- 哪些变量采用特殊处理
-- 预处理示例命令
-- `ERA5 msl`、加权平均变量和 `nino34` 派生方式的说明
+- `ACCESS-CM2`
+- `ACCESS-ESM1-5`
+- `CanESM5`
+- `CAS-ESM2-0`
+- `CESM2`
+- `CESM2-WACCM`
+- `CNRM-CM6-1`
+- `E3SM-1-0`
+- `EC-Earth3`
+- `FGOALS-g3`
+- `IPSL-CM5A2-INCA`
+- `IPSL-CM6A-LR`
+- `MIROC6`
+- `MRI-ESM2-0`
+- `NorESM2-MM`
+- `UKESM1-0-LL`
 
-## Checkpoint
+The two missing CMIP6 models are:
 
-当前发布版保留了 3 组核心 checkpoint：
+- `CMCC-ESM2`
+- `FGOALS-f3-L`
 
-- `final_24_complete`：最终发布版主 checkpoint
-- `seed_24_run`：复现最终 24 个月结果时使用的直接 seed
-- `lead23_baseline`：更早期的高 lead baseline，用于对比
+Additional raw data used by the released preprocessing pipeline:
 
-具体名称、作用、服务器路径和关键指标见：
+- `GODAS`
+- `ORAS5`
+- `ERA5 mean sea level pressure (msl)`
 
-- `checkpoints/MANIFEST.json`
-- `checkpoints/README.md`
+## Checkpoints
 
-在服务器发布目录中，`checkpoints/` 下也保留了相同别名的软链接。
+Core released checkpoints:
 
-## 如何复现
+- `final_24_complete`: final released main checkpoint
+- `seed_24_run`: direct seed used to reproduce the final 24-month result
 
-### 1. 设置路径
+## Release Files
 
-如果你的处理后数据不在默认目录 `./data/ctefnet_data` 下，可以先设置：
-
-```bash
-export ENSOX_DATA_ROOT=/path/to/ctefnet_data
-export ENSOX_INIT_CKPT=/path/to/seed_24_run/best_frontier.ckpt
-export ENSOX_OUTPUT_ROOT=/path/to/save/checkpoints
-```
-
-最终配置支持 `${VAR}` 和 `${VAR:-default}` 形式的环境变量展开。
-
-### 2. 复现最终 24 个月训练
-
-```bash
-bash scripts/run_train_enso_x.sh
-```
-
-等价命令：
-
-```bash
-python train.py --config ./configs/enso_x_24_final.yaml
-```
-
-### 3. 评估最终 checkpoint
-
-```bash
-bash scripts/run_limit_eval_enso_x.sh ./checkpoints/final_24_complete/best.ckpt ./results/enso_x_limit_eval.json
-```
-
-等价命令：
-
-```bash
-python scripts/evaluate_limit_enso_x.py \
-  --base-config ./configs/enso_x_24_final.yaml \
-  --ckpt ./checkpoints/final_24_complete/best.ckpt \
-  --data-root "${ENSOX_DATA_ROOT:-./data/ctefnet_data}" \
-  --output-json ./results/enso_x_limit_eval.json
-```
-
-## 发布结果文件
-
-- `results/enso_x_summary.json`：主结果摘要
-- `results/enso_x_generalization_20260425.json`：外部泛化结果
-- `results/enso_x_limit_eval_20260425.json`：外推评估摘要
+- `results/enso_x_summary.json`: main result summary
+- `results/enso_x_generalization_20260425.json`: external generalization summary
+- `results/enso_x_limit_eval_20260425.json`: extrapolation summary
