@@ -8,8 +8,8 @@ model:
   decoder_depth: 6
   dim_feedforward: 256
   dropout: 0.1
-  init_ckpt: ${ENSOX_INIT_CKPT:-./checkpoints/seed_24_run/best_frontier.ckpt}
-  init_ckpt_optional: false
+  init_ckpt: ${ENSOX_INIT_CKPT:-}
+  init_ckpt_optional: true
   init_ckpt_strict: false
   memory_mode: hybrid_dual
   dual_memory_hidden: 192

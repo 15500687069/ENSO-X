@@ -61,7 +61,6 @@ External CMIP6 evaluation:
 - `scripts/evaluate_limit_enso_x.py`: long-range extrapolation evaluation
 - `scripts/run_train_enso_x.sh`: training launcher
 - `scripts/run_limit_eval_enso_x.sh`: extrapolation evaluation launcher
-- `checkpoints/`: checkpoint manifest and notes
 - `results/`: release result summaries
 
 ## Environment
@@ -70,7 +69,7 @@ The repository keeps three environment references:
 
 - `requirements.txt`: minimal runtime dependencies
 - `requirements-preprocess.txt`: preprocessing dependencies
-- `environment.yml`: exported server environment used by the released package
+- `environment.yml`: full environment file used for the release
 
 ## Data Preparation
 
@@ -84,13 +83,13 @@ data/ctefnet_data/
     ORAS5/
 ```
 
-Preprocessing converts raw CMIP6, GODAS, and ORAS5 fields into the normalized `npz` layout used by ENSO-X. The kept scripts are:
+Preprocessing converts raw CMIP6, GODAS, and ORAS5 monthly fields into normalized `npz` files on a unified grid. Monthly anomalies are computed after detrending and removing climatology. The kept scripts are:
 
 - `preprocess_cmip6_to_ensox.py`
 - `preprocess_godas_to_ensox.py`
 - `preprocess_oras5_to_ensox.py`
 
-CMIP6 data should follow the model list in Table S1, excluding the two missing models. The released package uses the following available CMIP6 models:
+The CMIP6 list follows Table S1 after removing the two unavailable models. The released package uses:
 
 - `ACCESS-CM2`
 - `ACCESS-ESM1-5`
@@ -114,7 +113,7 @@ The two missing CMIP6 models are:
 - `CMCC-ESM2`
 - `FGOALS-f3-L`
 
-Additional raw data used by the released preprocessing pipeline:
+Additional raw data used in preprocessing:
 
 - `GODAS`
 - `ORAS5`
@@ -122,13 +121,19 @@ Additional raw data used by the released preprocessing pipeline:
 
 ## Checkpoints
 
-Core released checkpoints:
+Core released checkpoints used in the experiments:
 
-- `final_24_complete`: final released main checkpoint
-- `seed_24_run`: direct seed used to reproduce the final 24-month result
+- `final_24_complete`
+- `seed_24_run`
 
 ## Release Files
 
 - `results/enso_x_summary.json`: main result summary
 - `results/enso_x_generalization_20260425.json`: external generalization summary
 - `results/enso_x_limit_eval_20260425.json`: extrapolation summary
+
+## References
+
+- Chen, Q., Cui, Y., Hong, G. et al. *Toward long-range ENSO prediction with an explainable deep learning model*. npj Climate and Atmospheric Science 8, 259 (2025). DOI: `10.1038/s41612-025-01159-w`
+- Zhou, L., Zhang, R.-H. & Tao, L. *AI-Enabled conditional nonlinear optimal perturbation enhances ensemble prediction of extreme El Niño events*. npj Climate and Atmospheric Science 9, 30 (2026). DOI: `10.1038/s41612-025-01303-6`
+- Zhang, Z., Meng, J., Qiu, Z. et al. *Enhancing the predictability limits of ENSO with physics-guided deep echo state networks*. npj Climate and Atmospheric Science 9, 92 (2026). DOI: `10.1038/s41612-026-01360-5`

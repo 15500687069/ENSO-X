@@ -1,7 +1,7 @@
 {
-  "base_config": "/root/ENSO-X/configs/enso_x_24_final.yaml",
-  "ckpt": "/root/autodl-tmp/enso_x_ckpts/enso_x_24_complete_20260425_145549/best_frontier.ckpt",
-  "data_root": "/root/CTEFNet-main/data/ctefnet_data",
+  "base_config": "./configs/enso_x_24_final.yaml",
+  "ckpt": "<external_checkpoint>",
+  "data_root": "./data/ctefnet_data",
   "trained_horizon": 24,
   "horizons": [
     24,
