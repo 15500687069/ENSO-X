@@ -70,7 +70,6 @@ The repository keeps three environment references:
 
 - `requirements.txt`: minimal runtime dependencies
 - `requirements-preprocess.txt`: preprocessing dependencies
-- `environment.yml`: exported server environment used by the released package
 
 ## Data Preparation
 
