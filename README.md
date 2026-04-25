@@ -132,6 +132,11 @@ Core released checkpoints used in the experiments:
 - `results/enso_x_generalization_20260425.json`: external generalization summary
 - `results/enso_x_limit_eval_20260425.json`: extrapolation summary
 
+## Contact
+
+- Contact: Yuzhi Wang (wangyzh267@mail2.sysu.edu.cn)
+- Institution: College of Atmospheric Sciences, Sun Yat-sen University
+
 ## References
 
 - Chen, Q., Cui, Y., Hong, G. et al. *Toward long-range ENSO prediction with an explainable deep learning model*. npj Climate and Atmospheric Science 8, 259 (2025). DOI: `10.1038/s41612-025-01159-w`
