@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environments
+.venv/
+venv/
+.env
+
+# Local data and outputs
+data/
+outputs/
+
+# Checkpoint binaries
+checkpoints/*.ckpt
+checkpoints/*/*.ckpt
+checkpoints/*/*.pth
+checkpoints/*/*.pt
+checkpoints/*/*.bin
+
+# Runtime logs and temp files
+*.log
+*.tmp
+*.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
