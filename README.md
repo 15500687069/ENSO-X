@@ -90,7 +90,7 @@ Preprocessing converts raw CMIP6, GODAS, and ORAS5 fields into the normalized `n
 - `preprocess_godas_to_ensox.py`
 - `preprocess_oras5_to_ensox.py`
 
-CMIP6 data should follow the model list in Table S1, excluding the two missing models. The released package uses the following available CMIP6 models:
+CMIP6 data should follow the available CMIP6 models:
 
 - `ACCESS-CM2`
 - `ACCESS-ESM1-5`
@@ -108,11 +108,6 @@ CMIP6 data should follow the model list in Table S1, excluding the two missing m
 - `MRI-ESM2-0`
 - `NorESM2-MM`
 - `UKESM1-0-LL`
-
-The two missing CMIP6 models are:
-
-- `CMCC-ESM2`
-- `FGOALS-f3-L`
 
 Additional raw data used by the released preprocessing pipeline:
 
