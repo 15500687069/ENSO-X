@@ -8,7 +8,7 @@ ENSO-X is an independently designed model for long-lead ENSO prediction under a 
 - **Continuous 24-month skill**: the released GODAS checkpoint reaches `24/24` lead months with `corr > 0.5` on `GODAS 2015-2021`.
 - **Physical memory design**: the memory branch uses warm-water-volume, trade-wind, and basin-mean SST proxies to represent recharge, wind forcing, and persistence.
 - **Extreme-event improvement**: strong warm-event amplitude is no longer systematically underestimated in the main GODAS validation, and an optional extreme-event calibration experiment further improves warm/cold event recall while keeping 24-month skill.
-- **Probabilistic extension**: an initial-condition perturbation ensemble keeps deterministic 24-month skill and improves event Brier scores, although the ensemble spread is still under-dispersive and should be treated as a pilot result.
+
 
 ## Model Overview
 
@@ -52,28 +52,11 @@ Released GODAS checkpoint on `GODAS 2015-2021`:
 - minimum lead correlation: `0.5129`
 - mean lead correlation: `0.6784`
 
-Lead correlations:
-
-```text
-0.9471, 0.9330, 0.9009, 0.8501, 0.7895, 0.7646,
-0.7129, 0.6827, 0.6515, 0.6271, 0.6334, 0.6467,
-0.6568, 0.6579, 0.7072, 0.6966, 0.6053, 0.5129,
-0.5221, 0.5810, 0.5840, 0.5268, 0.5349, 0.5559
-```
-
 Extreme-event summary on `GODAS 2015-2021`:
 
 - main checkpoint warm-event amplitude bias: `+0.031`
 - warm-event recall: `0.667`
 - optional calibration keeps `24/24` lead skill and improves warm-event recall to `0.889`
-
-Probabilistic pilot on `GODAS 2015-2021`:
-
-- 21-member initial-condition perturbation ensemble
-- ensemble mean remains `24/24` with `corr > 0.5`
-- warm-event Brier score improves from `0.193` to `0.156`
-- cold-event Brier score improves from `0.193` to `0.165`
-- 80% interval coverage is still low (`0.30`), so probability calibration is a future improvement target
 
 ## Repository Layout
 
@@ -107,54 +90,6 @@ Variable notes:
 - `thetao_wmean` is treated as the warm-water-volume-related thermal memory field.
 - The memory features are computed from selected tropical Pacific regions after preprocessing.
 
-## Checkpoints
-
-Checkpoint binaries are intentionally not stored in this repository. The released checkpoint should be kept locally and passed through:
-
-```bash
-export ENSOX_INIT_CKPT=/path/to/enso_x_godas24_best_frontier.ckpt
-```
-
-## Quick Start
-
-Install the minimal runtime dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Set the data path and checkpoint path:
-
-```bash
-export ENSOX_DATA_ROOT=/path/to/data/ctefnet_data
-export ENSOX_INIT_CKPT=/path/to/enso_x_godas24_best_frontier.ckpt
-```
-
-Run training or fine-tuning:
-
-```bash
-bash scripts/run_train_enso_x.sh
-```
-
-Run extreme-event evaluation:
-
-```bash
-python scripts/evaluate_extreme_enso_x.py \
-  --base-config configs/enso_x_24_final.yaml \
-  --ckpt "$ENSOX_INIT_CKPT" \
-  --data-root "$ENSOX_DATA_ROOT" \
-  --output-json results/enso_x_extreme_results.json
-```
-
-Run the probabilistic pilot:
-
-```bash
-python scripts/evaluate_probabilistic_enso_x.py \
-  --base-config configs/enso_x_24_final.yaml \
-  --ckpt "$ENSOX_INIT_CKPT" \
-  --data-root "$ENSOX_DATA_ROOT" \
-  --output-json results/enso_x_probabilistic_pilot.json
-```
 
 ## Contact
 
