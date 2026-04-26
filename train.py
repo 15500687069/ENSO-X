@@ -275,6 +275,50 @@ def build_model(cfg, memory_dim):
         memory_cross_attn_heads=int(model_cfg.get("memory_cross_attn_heads", model_cfg.get("head", 4))),
         memory_residual_scale=float(model_cfg.get("memory_residual_scale", 0.8)),
         memory_bridge_scale=float(model_cfg.get("memory_bridge_scale", 0.2)),
+        warm_growth_enabled=_as_bool(model_cfg.get("warm_growth_enabled", False), default=False),
+        warm_growth_start=int(model_cfg.get("warm_growth_start", 8)),
+        warm_growth_end=int(model_cfg.get("warm_growth_end", data_cfg.get("pred_time", 24))),
+        warm_growth_context=int(model_cfg.get("warm_growth_context", 2)),
+        warm_growth_hidden=int(model_cfg.get("warm_growth_hidden", 0)),
+        warm_growth_layers=int(model_cfg.get("warm_growth_layers", 1)),
+        warm_growth_scale=float(model_cfg.get("warm_growth_scale", -1.2)),
+        prefix_chain_enabled=_as_bool(model_cfg.get("prefix_chain_enabled", False), default=False),
+        prefix_chain_start=int(model_cfg.get("prefix_chain_start", 5)),
+        prefix_chain_end=int(model_cfg.get("prefix_chain_end", 12)),
+        prefix_chain_hidden=int(model_cfg.get("prefix_chain_hidden", 0)),
+        prefix_chain_scale=float(model_cfg.get("prefix_chain_scale", -0.8)),
+        prefix_chain_detach_prev=_as_bool(model_cfg.get("prefix_chain_detach_prev", False), default=False),
+        prefix_band_enabled=_as_bool(model_cfg.get("prefix_band_enabled", False), default=False),
+        prefix_band_start=int(model_cfg.get("prefix_band_start", 5)),
+        prefix_band_end=int(model_cfg.get("prefix_band_end", 12)),
+        prefix_band_hidden=int(model_cfg.get("prefix_band_hidden", 0)),
+        prefix_band_layers=int(model_cfg.get("prefix_band_layers", 2)),
+        prefix_band_scale=float(model_cfg.get("prefix_band_scale", -0.7)),
+        prefix_direct_enabled=_as_bool(model_cfg.get("prefix_direct_enabled", False), default=False),
+        prefix_direct_start=int(model_cfg.get("prefix_direct_start", 7)),
+        prefix_direct_end=int(model_cfg.get("prefix_direct_end", 12)),
+        prefix_direct_hidden=int(model_cfg.get("prefix_direct_hidden", 0)),
+        prefix_direct_layers=int(model_cfg.get("prefix_direct_layers", 2)),
+        prefix_direct_scale=float(model_cfg.get("prefix_direct_scale", -0.4)),
+        prefix_direct_mode=str(model_cfg.get("prefix_direct_mode", "residual")),
+        lead_mixer_enabled=_as_bool(model_cfg.get("lead_mixer_enabled", False), default=False),
+        lead_mixer_start=int(model_cfg.get("lead_mixer_start", 8)),
+        lead_mixer_end=int(model_cfg.get("lead_mixer_end", 24)),
+        lead_mixer_hidden=int(model_cfg.get("lead_mixer_hidden", 16)),
+        lead_mixer_kernel=int(model_cfg.get("lead_mixer_kernel", 7)),
+        lead_mixer_scale=float(model_cfg.get("lead_mixer_scale", -0.7)),
+        regional_ridge_enabled=_as_bool(model_cfg.get("regional_ridge_enabled", False), default=False),
+        regional_ridge_scale=float(model_cfg.get("regional_ridge_scale", 4.0)),
+        legal_analog_enabled=_as_bool(model_cfg.get("legal_analog_enabled", False), default=False),
+        legal_analog_scale=float(model_cfg.get("legal_analog_scale", 8.0)),
+        legal_analog_topk=int(model_cfg.get("legal_analog_topk", 3)),
+        legal_analog_blend=float(model_cfg.get("legal_analog_blend", 0.35)),
+        legal_analog_power=float(model_cfg.get("legal_analog_power", 0.5)),
+        legal_analog_distance_gate_enabled=_as_bool(
+            model_cfg.get("legal_analog_distance_gate_enabled", False), default=False
+        ),
+        legal_analog_distance_threshold=float(model_cfg.get("legal_analog_distance_threshold", 0.0)),
+        legal_analog_distance_temperature=float(model_cfg.get("legal_analog_distance_temperature", 1.0)),
     )
     return model
 
@@ -288,6 +332,7 @@ def train_one_epoch(
     clip_grad=0.0,
     anchor_params=None,
     l2sp_lambda=0.0,
+    augment_cfg=None,
 ):
     model.train()
     meter = AverageMeter()
@@ -297,6 +342,7 @@ def train_one_epoch(
         m_hist = m_hist.to(device, non_blocking=True)
         m_future = m_future.to(device, non_blocking=True)
         init_month = init_month.to(device, non_blocking=True)
+        x_field, m_hist = apply_train_augmentation(x_field, m_hist, augment_cfg)
 
         optimizer.zero_grad(set_to_none=True)
         with autocast(enabled=(device.type == "cuda")):
@@ -327,12 +373,79 @@ def train_one_epoch(
     return meter.avg
 
 
+def _randn_like_shape(ref, shape):
+    return torch.randn(shape, device=ref.device, dtype=ref.dtype)
+
+
+def apply_train_augmentation(x_field, m_hist, augment_cfg):
+    """Train-only input perturbation for reanalysis robustness."""
+    if not isinstance(augment_cfg, dict) or not _as_bool(augment_cfg.get("enabled", False), default=False):
+        return x_field, m_hist
+
+    b, _, c, _, _ = x_field.shape
+    field_gain_std = float(augment_cfg.get("field_channel_gain_std", 0.0))
+    field_bias_std = float(augment_cfg.get("field_channel_bias_std", 0.0))
+    field_noise_std = float(augment_cfg.get("field_noise_std", 0.0))
+    field_dropout_prob = float(augment_cfg.get("field_dropout_prob", 0.0))
+    memory_gain_std = float(augment_cfg.get("memory_gain_std", 0.0))
+    memory_bias_std = float(augment_cfg.get("memory_bias_std", 0.0))
+    memory_noise_std = float(augment_cfg.get("memory_noise_std", 0.0))
+
+    if field_gain_std > 0.0:
+        gain = 1.0 + _randn_like_shape(x_field, (b, 1, c, 1, 1)) * field_gain_std
+        x_field = x_field * gain
+    if field_bias_std > 0.0:
+        scale = x_field.std(dim=(1, 3, 4), keepdim=True).clamp_min(1.0e-4)
+        bias = _randn_like_shape(x_field, (b, 1, c, 1, 1)) * scale * field_bias_std
+        x_field = x_field + bias
+    if field_noise_std > 0.0:
+        scale = x_field.std(dim=(1, 3, 4), keepdim=True).clamp_min(1.0e-4)
+        x_field = x_field + torch.randn_like(x_field) * scale * field_noise_std
+    if field_dropout_prob > 0.0:
+        keep = (torch.rand((b, 1, c, 1, 1), device=x_field.device) >= field_dropout_prob).to(dtype=x_field.dtype)
+        channel_mean = x_field.mean(dim=(1, 3, 4), keepdim=True)
+        x_field = keep * x_field + (1.0 - keep) * channel_mean
+
+    if _as_bool(augment_cfg.get("clamp_field", True), default=True):
+        lo = float(augment_cfg.get("field_clamp_min", 0.0))
+        hi = float(augment_cfg.get("field_clamp_max", 1.0))
+        x_field = x_field.clamp(lo, hi)
+
+    if memory_gain_std > 0.0:
+        gain = 1.0 + _randn_like_shape(m_hist, (m_hist.size(0), 1, m_hist.size(2))) * memory_gain_std
+        m_hist = m_hist * gain
+    if memory_bias_std > 0.0:
+        scale = m_hist.std(dim=1, keepdim=True).clamp_min(1.0e-4)
+        bias = _randn_like_shape(m_hist, (m_hist.size(0), 1, m_hist.size(2))) * scale * memory_bias_std
+        m_hist = m_hist + bias
+    if memory_noise_std > 0.0:
+        scale = m_hist.std(dim=1, keepdim=True).clamp_min(1.0e-4)
+        m_hist = m_hist + torch.randn_like(m_hist) * scale * memory_noise_std
+
+    return x_field, m_hist
+
+
 def resolve_ckpt_path(root, ckpt_path):
     if not ckpt_path:
         return None
     if os.path.isabs(ckpt_path):
         return ckpt_path
     return os.path.normpath(os.path.join(root, ckpt_path))
+
+
+def _dataset_metadata(dataset):
+    if dataset is None:
+        return {}
+    meta_fn = getattr(dataset, "metadata", None)
+    if callable(meta_fn):
+        try:
+            return meta_fn()
+        except Exception:
+            return {}
+    meta = getattr(dataset, "meta", None)
+    if isinstance(meta, dict):
+        return dict(meta)
+    return {}
 
 
 def _remap_legacy_ctefnet_state(state, model_state):
@@ -416,6 +529,14 @@ def load_init_checkpoint(model, model_cfg):
     ckpt = torch.load(init_ckpt, map_location="cpu", weights_only=False)
     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
     model_ref = model.module if hasattr(model, "module") else model
+    skip_patterns = [str(x) for x in model_cfg.get("init_ckpt_skip_patterns", []) if str(x).strip()]
+    if skip_patterns:
+        state = {
+            k: v
+            for k, v in state.items()
+            if not any(pat in k for pat in skip_patterns)
+        }
+        print("Init ckpt skip patterns applied:", skip_patterns)
 
     remap_mode = str(model_cfg.get("init_ckpt_remap", "")).lower().strip()
     if remap_mode in ("legacy_ctefnet", "ctefnet_v1"):
@@ -430,11 +551,16 @@ def load_init_checkpoint(model, model_cfg):
         filtered_state = {}
         skipped_shape = []
         partial_shape = []
+        dynamic_buffers = []
         for k, v in state.items():
             cur = current_state.get(k)
             if cur is None:
                 continue
             if tuple(cur.shape) != tuple(v.shape):
+                if k.startswith("legal_analog_") and cur.numel() == 0:
+                    setattr(model_ref, k, v.detach().clone().to(device=cur.device, dtype=cur.dtype))
+                    dynamic_buffers.append((k, tuple(v.shape)))
+                    continue
                 if cur.ndim == v.ndim and cur.ndim > 0:
                     overlap = tuple(min(int(a), int(b)) for a, b in zip(cur.shape, v.shape))
                     if all(x > 0 for x in overlap):
@@ -454,6 +580,9 @@ def load_init_checkpoint(model, model_cfg):
                 init_ckpt, len(filtered_state), len(partial_shape), len(skipped_shape)
             )
         )
+        if dynamic_buffers:
+            preview = dynamic_buffers[:8]
+            print("  dynamic-buffer loads:", preview)
         if partial_shape:
             preview = partial_shape[:8]
             print("  partial-shape samples:", preview)
@@ -465,6 +594,100 @@ def load_init_checkpoint(model, model_cfg):
     print("Loaded init_ckpt from {} (epoch={}, score={})".format(init_ckpt, src_epoch, src_score))
     anchor_state = {k: v.detach().clone() for k, v in loaded_state.items()}
     return anchor_state
+
+
+def load_regional_ridge_init(model, model_cfg):
+    init_path = model_cfg.get("regional_ridge_init")
+    if not init_path:
+        return
+    init_path = resolve_ckpt_path(ROOT, init_path)
+    if not os.path.exists(init_path):
+        raise FileNotFoundError("regional_ridge_init not found: {}".format(init_path))
+    model_ref = model.module if hasattr(model, "module") else model
+    if not getattr(model_ref, "regional_ridge_enabled", False):
+        print("Warning: regional_ridge_init is set but regional_ridge is disabled")
+        return
+    payload = np.load(init_path)
+    weight = torch.tensor(payload["weight"], dtype=model_ref.regional_ridge_head.weight.dtype)
+    bias = torch.tensor(payload["bias"], dtype=model_ref.regional_ridge_head.bias.dtype)
+    if tuple(weight.shape) != tuple(model_ref.regional_ridge_head.weight.shape):
+        raise ValueError(
+            "regional ridge weight shape mismatch: {} vs {}".format(
+                tuple(weight.shape),
+                tuple(model_ref.regional_ridge_head.weight.shape),
+            )
+        )
+    if tuple(bias.shape) != tuple(model_ref.regional_ridge_head.bias.shape):
+        raise ValueError(
+            "regional ridge bias shape mismatch: {} vs {}".format(
+                tuple(bias.shape),
+                tuple(model_ref.regional_ridge_head.bias.shape),
+            )
+        )
+    with torch.no_grad():
+        model_ref.regional_ridge_head.weight.copy_(weight.to(model_ref.regional_ridge_head.weight.device))
+        model_ref.regional_ridge_head.bias.copy_(bias.to(model_ref.regional_ridge_head.bias.device))
+    print("Loaded regional_ridge_init from {}".format(init_path))
+
+
+def load_legal_analog_init(model, model_cfg):
+    init_path = model_cfg.get("legal_analog_init")
+    if not init_path:
+        return
+    init_path = resolve_ckpt_path(ROOT, init_path)
+    if not os.path.exists(init_path):
+        raise FileNotFoundError("legal_analog_init not found: {}".format(init_path))
+    model_ref = model.module if hasattr(model, "module") else model
+    if not getattr(model_ref, "legal_analog_enabled", False):
+        print("Warning: legal_analog_init is set but legal_analog is disabled")
+        return
+
+    payload = np.load(init_path, allow_pickle=True)
+    required = [
+        "mean",
+        "std",
+        "ridge_weight",
+        "ridge_bias",
+        "pca_vt",
+        "analog_proto",
+        "analog_targets",
+    ]
+    missing = [k for k in required if k not in payload]
+    if missing:
+        raise KeyError("legal_analog_init missing keys: {}".format(missing))
+
+    device = next(model_ref.parameters()).device
+
+    def set_buffer(name, value):
+        tensor = torch.as_tensor(value, dtype=torch.float32, device=device)
+        if name not in model_ref._buffers:
+            model_ref.register_buffer(name, tensor, persistent=True)
+        else:
+            setattr(model_ref, name, tensor)
+
+    set_buffer("legal_analog_mean", payload["mean"])
+    set_buffer("legal_analog_std", payload["std"])
+    set_buffer("legal_analog_ridge_weight", payload["ridge_weight"])
+    set_buffer("legal_analog_ridge_bias", payload["ridge_bias"])
+    set_buffer("legal_analog_pca_vt", payload["pca_vt"])
+    set_buffer("legal_analog_proto", payload["analog_proto"])
+    set_buffer("legal_analog_targets", payload["analog_targets"])
+    if "blend" in payload:
+        set_buffer("legal_analog_blend", np.asarray(payload["blend"], dtype=np.float32))
+    if "power" in payload:
+        set_buffer("legal_analog_power", np.asarray(payload["power"], dtype=np.float32))
+    if "topk" in payload:
+        model_ref.legal_analog_topk = int(np.asarray(payload["topk"]).reshape(-1)[0])
+
+    print(
+        "Loaded legal_analog_init from {} feature_dim={} proto={} pca_dim={} topk={}".format(
+            init_path,
+            int(model_ref.legal_analog_mean.numel()),
+            tuple(model_ref.legal_analog_proto.shape),
+            tuple(model_ref.legal_analog_pca_vt.shape),
+            int(model_ref.legal_analog_topk),
+        )
+    )
 
 
 def _as_pattern_list(value):
@@ -634,12 +857,20 @@ def main():
 
     train_loader, valid_loader, train_dataset = build_dataloaders(cfg)
     model = build_model(cfg, memory_dim=train_dataset.memory_dim).to(device)
+    train_dataset_meta = _dataset_metadata(train_dataset)
+    valid_dataset_meta = _dataset_metadata(valid_loader.dataset)
+    if train_dataset_meta:
+        print("[Data] train dataset meta:", json.dumps(train_dataset_meta, ensure_ascii=False))
+    if valid_dataset_meta:
+        print("[Data] valid dataset meta:", json.dumps(valid_dataset_meta, ensure_ascii=False))
 
     if device.type == "cuda" and torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model)
 
     model_cfg = cfg.get("model", {})
     anchor_state = load_init_checkpoint(model, model_cfg)
+    load_regional_ridge_init(model, model_cfg)
+    load_legal_analog_init(model, model_cfg)
 
     criterion = build_loss(cfg).to(device)
     opt_cfg = cfg.get("optimizer", {})
@@ -692,6 +923,9 @@ def main():
 
     out_cfg = cfg.get("summary", {})
     eval_cfg = cfg.get("eval_ensemble", {})
+    augment_cfg = cfg.get("augmentation", {})
+    if isinstance(augment_cfg, dict) and _as_bool(augment_cfg.get("enabled", False), default=False):
+        print("[Train] augmentation enabled:", json.dumps(augment_cfg, ensure_ascii=False, sort_keys=True))
     save_dir = os.path.join(ROOT, out_cfg.get("save_dir", "checkpoints"), out_cfg.get("exp_name", "enso_x"))
     os.makedirs(save_dir, exist_ok=True)
 
@@ -747,6 +981,8 @@ def main():
             "leading": leading_,
             "corr": corr_,
             "corr_metrics": corr_stats_,
+            "train_data_meta": train_dataset_meta,
+            "valid_data_meta": valid_dataset_meta,
         }
 
     def monitor_key(score_, leading_, corr_stats_):
@@ -801,6 +1037,7 @@ def main():
             clip_grad=float(opt_cfg.get("grad_clip", 0.0)),
             anchor_params=anchor_params,
             l2sp_lambda=l2sp_lambda,
+            augment_cfg=augment_cfg,
         )
         valid_loss, score, corr, leading = evaluate(
             model,
@@ -942,6 +1179,7 @@ def main():
 
     summary = {
         "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "init_ckpt": resolve_ckpt_path(ROOT, model_cfg.get("init_ckpt")),
         "best_score": float(best_score),
         "best_score_epoch": int(best_epoch + 1),
         "best_leading": int(best_leading),
@@ -960,6 +1198,8 @@ def main():
         "epochs_planned": int(num_epochs),
         "epochs_completed": int(epoch + 1),
         "early_stop_patience": int(early_stop_patience),
+        "train_data_meta": train_dataset_meta,
+        "valid_data_meta": valid_dataset_meta,
     }
     if best_lead_corr is not None:
         summary["best_lead_corr"] = np.asarray(best_lead_corr).tolist()

@@ -28,6 +28,16 @@ class ENSOXLoss(nn.Module):
         lead_proxy_temp: float = 0.08,
         lead_proxy_start: int = 1,
         lead_proxy_end: int = 0,
+        lambda_prefix_floor: float = 0.0,
+        prefix_floor_start: int = 1,
+        prefix_floor_end: int = 0,
+        prefix_floor_target: float = 0.5,
+        prefix_floor_temp: float = 0.03,
+        lambda_prefix_chain: float = 0.0,
+        prefix_chain_start: int = 1,
+        prefix_chain_end: int = 0,
+        prefix_chain_target: float = 0.5,
+        prefix_chain_temp: float = 0.03,
         lambda_whm_coupling: float = 0.0,
         whm_target_abs_corr: float = 0.20,
         whm_focus_start: int = 8,
@@ -36,6 +46,13 @@ class ENSOXLoss(nn.Module):
         whm_wind_idx: int = 1,
         whm_sst_idx: int = 2,
         whm_alpha: float = 0.7,
+        lambda_warm_event: float = 0.0,
+        lambda_warm_peak: float = 0.0,
+        lambda_warm_timing: float = 0.0,
+        lambda_warm_non_event_reg: float = 0.0,
+        warm_event_quantile: float = 0.8,
+        warm_event_min_amp: float = 0.10,
+        warm_event_margin: float = 0.02,
     ):
         super().__init__()
         self.pred_time = pred_time
@@ -58,6 +75,16 @@ class ENSOXLoss(nn.Module):
         self.lead_proxy_temp = float(lead_proxy_temp)
         self.lead_proxy_start = int(lead_proxy_start)
         self.lead_proxy_end = int(lead_proxy_end)
+        self.lambda_prefix_floor = float(lambda_prefix_floor)
+        self.prefix_floor_start = int(prefix_floor_start)
+        self.prefix_floor_end = int(prefix_floor_end)
+        self.prefix_floor_target = float(prefix_floor_target)
+        self.prefix_floor_temp = float(prefix_floor_temp)
+        self.lambda_prefix_chain = float(lambda_prefix_chain)
+        self.prefix_chain_start = int(prefix_chain_start)
+        self.prefix_chain_end = int(prefix_chain_end)
+        self.prefix_chain_target = float(prefix_chain_target)
+        self.prefix_chain_temp = float(prefix_chain_temp)
         self.lambda_whm_coupling = float(lambda_whm_coupling)
         self.whm_target_abs_corr = float(whm_target_abs_corr)
         self.whm_focus_start = int(whm_focus_start)
@@ -66,6 +93,13 @@ class ENSOXLoss(nn.Module):
         self.whm_wind_idx = int(whm_wind_idx)
         self.whm_sst_idx = int(whm_sst_idx)
         self.whm_alpha = float(whm_alpha)
+        self.lambda_warm_event = float(lambda_warm_event)
+        self.lambda_warm_peak = float(lambda_warm_peak)
+        self.lambda_warm_timing = float(lambda_warm_timing)
+        self.lambda_warm_non_event_reg = float(lambda_warm_non_event_reg)
+        self.warm_event_quantile = float(warm_event_quantile)
+        self.warm_event_min_amp = float(warm_event_min_amp)
+        self.warm_event_margin = float(warm_event_margin)
         if lead_weights is None:
             lead_weights = np.array([1.2] * 6 + [1.8] * 6 + [2.2] * 6 + [2.8] * 24, dtype=np.float32)[:pred_time]
         self.register_buffer("lead_weights", torch.tensor(lead_weights, dtype=torch.float32), persistent=False)
@@ -135,6 +169,33 @@ class ENSOXLoss(nn.Module):
                 margin = (self.lead_threshold - lp_corr) / temp
                 lead_proxy_loss = (F.softplus(margin) * lp_weights).sum()
 
+        prefix_floor_loss = torch.tensor(0.0, device=pred.device)
+        if self.lambda_prefix_floor > 0.0:
+            pf_start = min(max(self.prefix_floor_start - 1, 0), self.pred_time - 1)
+            pf_end = self.pred_time if self.prefix_floor_end <= 0 else min(max(self.prefix_floor_end, self.prefix_floor_start), self.pred_time)
+            pf_corr = corr_per_lead[pf_start:pf_end]
+            if pf_corr.numel() > 0:
+                temp = max(self.prefix_floor_temp, 1e-4)
+                soft_min = -temp * torch.logsumexp(-pf_corr / temp, dim=0)
+                prefix_floor_loss = F.relu(self.prefix_floor_target - soft_min)
+
+        prefix_chain_loss = torch.tensor(0.0, device=pred.device)
+        if self.lambda_prefix_chain > 0.0:
+            pc_start = min(max(self.prefix_chain_start - 1, 0), self.pred_time - 1)
+            pc_end = self.pred_time if self.prefix_chain_end <= 0 else min(max(self.prefix_chain_end, self.prefix_chain_start), self.pred_time)
+            pc_corr = corr_per_lead[pc_start:pc_end]
+            if pc_corr.numel() > 0:
+                temp = max(self.prefix_chain_temp, 1e-4)
+                prefix_softmins = []
+                for i in range(int(pc_corr.numel())):
+                    prefix_softmins.append(-temp * torch.logsumexp(-pc_corr[: i + 1] / temp, dim=0))
+                prefix_softmins = torch.stack(prefix_softmins, dim=0)
+                chain_weights = torch.arange(
+                    1, prefix_softmins.numel() + 1, device=pred.device, dtype=pred.dtype
+                )
+                chain_weights = chain_weights / (chain_weights.sum() + 1e-8)
+                prefix_chain_loss = (F.relu(self.prefix_chain_target - prefix_softmins) * chain_weights).sum()
+
         whm_coupling_loss = torch.tensor(0.0, device=pred.device)
         if self.lambda_whm_coupling > 0.0 and memory_future is not None:
             mem = memory_future
@@ -163,13 +224,55 @@ class ENSOXLoss(nn.Module):
                     c_weights = c_weights / (c_weights.sum() + 1e-8)
                     whm_coupling_loss = (F.relu(self.whm_target_abs_corr - corr_abs) * c_weights).sum()
 
+        warm_event_loss = torch.tensor(0.0, device=pred.device)
+        warm_peak_loss = torch.tensor(0.0, device=pred.device)
+        warm_timing_loss = torch.tensor(0.0, device=pred.device)
+        warm_non_event_reg = torch.tensor(0.0, device=pred.device)
+        if (
+            (self.lambda_warm_event > 0.0 or self.lambda_warm_peak > 0.0 or self.lambda_warm_timing > 0.0 or self.lambda_warm_non_event_reg > 0.0)
+            and outputs.get("warm_event_logit", None) is not None
+        ):
+            target_main = target_index[:, 0, :] if target_index.ndim == 3 else target_index
+            center = target_main.median(dim=-1, keepdim=True).values
+            warm_amp_true = torch.clamp(target_main.max(dim=-1).values - center.squeeze(-1), min=0.0)
+            cold_amp_true = torch.clamp(center.squeeze(-1) - target_main.min(dim=-1).values, min=0.0)
+            if warm_amp_true.numel() > 1:
+                warm_q = torch.quantile(warm_amp_true.detach(), self.warm_event_quantile)
+            else:
+                warm_q = warm_amp_true.max().detach()
+            warm_thr = torch.maximum(warm_q, pred.new_tensor(self.warm_event_min_amp))
+            warm_mask = torch.logical_and(
+                warm_amp_true >= warm_thr,
+                warm_amp_true >= cold_amp_true + float(self.warm_event_margin),
+            )
+            event_target = warm_mask.float().view(-1, 1)
+            warm_event_loss = F.binary_cross_entropy_with_logits(outputs["warm_event_logit"], event_target)
+
+            if bool(warm_mask.any().item()):
+                peak_target = warm_amp_true.unsqueeze(-1).expand(-1, pred.shape[1])
+                warm_peak_loss = F.smooth_l1_loss(outputs["warm_peak_pred"][warm_mask], peak_target[warm_mask])
+                timing_target = target_main.argmax(dim=-1)
+                warm_timing_loss = F.cross_entropy(outputs["warm_timing_logit"][warm_mask], timing_target[warm_mask])
+
+            if outputs.get("base_index_pred", None) is not None:
+                delta = outputs["index_pred"] - outputs["base_index_pred"]
+                nonwarm_mask = ~warm_mask
+                if bool(nonwarm_mask.any().item()):
+                    warm_non_event_reg = delta[nonwarm_mask].abs().mean()
+
         total = (
             index_loss
             + self.lambda_memory * memory_loss
             + self.lambda_corr * corr_loss
             + self.lambda_tail_corr * tail_loss
             + self.lambda_lead_proxy * lead_proxy_loss
+            + self.lambda_prefix_floor * prefix_floor_loss
+            + self.lambda_prefix_chain * prefix_chain_loss
             + self.lambda_whm_coupling * whm_coupling_loss
+            + self.lambda_warm_event * warm_event_loss
+            + self.lambda_warm_peak * warm_peak_loss
+            + self.lambda_warm_timing * warm_timing_loss
+            + self.lambda_warm_non_event_reg * warm_non_event_reg
         )
         return total, {
             "index_loss": float(index_loss.detach().cpu()),
@@ -177,7 +280,13 @@ class ENSOXLoss(nn.Module):
             "corr_loss": float(corr_loss.detach().cpu()),
             "tail_loss": float(tail_loss.detach().cpu()),
             "lead_proxy_loss": float(lead_proxy_loss.detach().cpu()),
+            "prefix_floor_loss": float(prefix_floor_loss.detach().cpu()),
+            "prefix_chain_loss": float(prefix_chain_loss.detach().cpu()),
             "whm_coupling_loss": float(whm_coupling_loss.detach().cpu()),
+            "warm_event_loss": float(warm_event_loss.detach().cpu()),
+            "warm_peak_loss": float(warm_peak_loss.detach().cpu()),
+            "warm_timing_loss": float(warm_timing_loss.detach().cpu()),
+            "warm_non_event_reg": float(warm_non_event_reg.detach().cpu()),
         }
 
 
@@ -206,6 +315,16 @@ def build_loss(cfg):
         lead_proxy_temp=float(loss_cfg.get("lead_proxy_temp", 0.08)),
         lead_proxy_start=int(loss_cfg.get("lead_proxy_start", 1)),
         lead_proxy_end=int(loss_cfg.get("lead_proxy_end", 0)),
+        lambda_prefix_floor=float(loss_cfg.get("lambda_prefix_floor", 0.0)),
+        prefix_floor_start=int(loss_cfg.get("prefix_floor_start", 1)),
+        prefix_floor_end=int(loss_cfg.get("prefix_floor_end", 0)),
+        prefix_floor_target=float(loss_cfg.get("prefix_floor_target", 0.5)),
+        prefix_floor_temp=float(loss_cfg.get("prefix_floor_temp", 0.03)),
+        lambda_prefix_chain=float(loss_cfg.get("lambda_prefix_chain", 0.0)),
+        prefix_chain_start=int(loss_cfg.get("prefix_chain_start", 1)),
+        prefix_chain_end=int(loss_cfg.get("prefix_chain_end", 0)),
+        prefix_chain_target=float(loss_cfg.get("prefix_chain_target", 0.5)),
+        prefix_chain_temp=float(loss_cfg.get("prefix_chain_temp", 0.03)),
         lambda_whm_coupling=float(loss_cfg.get("lambda_whm_coupling", 0.0)),
         whm_target_abs_corr=float(loss_cfg.get("whm_target_abs_corr", 0.20)),
         whm_focus_start=int(loss_cfg.get("whm_focus_start", 8)),
@@ -214,4 +333,11 @@ def build_loss(cfg):
         whm_wind_idx=int(loss_cfg.get("whm_wind_idx", 1)),
         whm_sst_idx=int(loss_cfg.get("whm_sst_idx", 2)),
         whm_alpha=float(loss_cfg.get("whm_alpha", 0.7)),
+        lambda_warm_event=float(loss_cfg.get("lambda_warm_event", 0.0)),
+        lambda_warm_peak=float(loss_cfg.get("lambda_warm_peak", 0.0)),
+        lambda_warm_timing=float(loss_cfg.get("lambda_warm_timing", 0.0)),
+        lambda_warm_non_event_reg=float(loss_cfg.get("lambda_warm_non_event_reg", 0.0)),
+        warm_event_quantile=float(loss_cfg.get("warm_event_quantile", 0.8)),
+        warm_event_min_amp=float(loss_cfg.get("warm_event_min_amp", 0.10)),
+        warm_event_margin=float(loss_cfg.get("warm_event_margin", 0.02)),
     )

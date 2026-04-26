@@ -1,27 +1,30 @@
 # ENSO-X
 
-ENSO-X is an independently designed model for long-lead ENSO prediction. It takes the previous 12 months of ocean-atmosphere fields as input and predicts the next 24 months of Niño3.4 evolution.
+ENSO-X is an independently designed model for long-lead ENSO prediction under a small-sample reanalysis setting. The model uses the previous 12 months of ocean-atmosphere fields to predict the next 24 months of the Niño3.4 index.
+
+## Highlights
+
+- **Small-sample long-lead prediction**: ENSO-X is trained mainly on GODAS reanalysis data and achieves stable 24-month prediction skill on a strictly later GODAS validation period.
+- **Continuous 24-month skill**: the released GODAS checkpoint reaches `24/24` lead months with `corr > 0.5` on `GODAS 2015-2021`.
+- **Physical memory design**: the memory branch uses warm-water-volume, trade-wind, and basin-mean SST proxies to represent recharge, wind forcing, and persistence.
+- **Extreme-event improvement**: strong warm-event amplitude is no longer systematically underestimated in the main GODAS validation, and an optional extreme-event calibration experiment further improves warm/cold event recall while keeping 24-month skill.
+- **Probabilistic extension**: an initial-condition perturbation ensemble keeps deterministic 24-month skill and improves event Brier scores, although the ensemble spread is still under-dispersive and should be treated as a pilot result.
 
 ## Model Overview
 
-ENSO-X uses a hybrid spatiotemporal framework with three main parts:
+ENSO-X uses a hybrid spatiotemporal forecasting framework:
 
-- Field encoder branch  
-  Uses 3D CNN and Transformer blocks to extract large-scale spatiotemporal features.
-- Memory branch  
-  Uses seasonal state-space dynamics and a physically inspired dual-memory mechanism to represent recharge, wind forcing, and persistence.
-- Lead repair branch  
-  Uses local bridge, interpolation, and patch modules to repair difficult lead windows and improve long-lead stability.
+- **Field encoder branch**: 3D CNN and Transformer blocks extract large-scale spatiotemporal features from ocean-atmosphere fields.
+- **Memory branch**: a physics-inspired dual-memory mechanism models recharge memory, wind forcing, and persistence effects.
+- **Lead repair branch**: local bridge, interpolation, and patch modules stabilize difficult lead windows and improve long-lead continuity.
 
 ## Data Setup
 
-The current ENSO-X release uses the following setup:
+Current release setting:
 
-- Training: `GODAS 1980-2014`
-- Replay augmentation: `ORAS5 1980-2014`
-- Main validation: `GODAS 2015-2021`
-- External generalization test: `CMIP6 2015-2023`
-- Long-range extrapolation test: `CMIP6 2015-2100`
+- Training set: `GODAS 1980-2014`
+- Replay augmentation: `ORAS5 1958-1978`
+- Main validation set: `GODAS 2015-2021`
 
 The model uses 9 predictor variables:
 
@@ -35,7 +38,7 @@ The model uses 9 predictor variables:
 - `mlotst`
 - `sos`
 
-The memory branch uses 3 derived features:
+The memory branch uses 3 derived memory features:
 
 - `wwv_proxy`
 - `trade_wind`
@@ -43,94 +46,115 @@ The memory branch uses 3 derived features:
 
 ## Main Results
 
-The released ENSO-X checkpoint achieves stable 24-month prediction skill in the main setting:
+Released GODAS checkpoint on `GODAS 2015-2021`:
 
 - `24/24` lead months with `corr > 0.5`
+- minimum lead correlation: `0.5129`
+- mean lead correlation: `0.6784`
 
-External CMIP6 evaluation:
+Lead correlations:
 
-- `CMIP6 2015-2023`: `corr > 0.5` through the first 24 months, and at least `corr > 0.2` through 48 months
-- `CMIP6 2015-2100`: in the current zero-shot extrapolation test, `corr > 0.5` remains valid through at least 48 months
+```text
+0.9471, 0.9330, 0.9009, 0.8501, 0.7895, 0.7646,
+0.7129, 0.6827, 0.6515, 0.6271, 0.6334, 0.6467,
+0.6568, 0.6579, 0.7072, 0.6966, 0.6053, 0.5129,
+0.5221, 0.5810, 0.5840, 0.5268, 0.5349, 0.5559
+```
+
+Extreme-event summary on `GODAS 2015-2021`:
+
+- main checkpoint warm-event amplitude bias: `+0.031`
+- warm-event recall: `0.667`
+- optional calibration keeps `24/24` lead skill and improves warm-event recall to `0.889`
+
+Probabilistic pilot on `GODAS 2015-2021`:
+
+- 21-member initial-condition perturbation ensemble
+- ensemble mean remains `24/24` with `corr > 0.5`
+- warm-event Brier score improves from `0.193` to `0.156`
+- cold-event Brier score improves from `0.193` to `0.165`
+- 80% interval coverage is still low (`0.30`), so probability calibration is a future improvement target
 
 ## Repository Layout
 
 - `train.py`: training entry point
-- `src/ensox/`: ENSO-X core code
-- `configs/enso_x_24_final.yaml`: final reproducible training configuration
-- `preprocess/`: preprocessing scripts used by the released package
-- `scripts/evaluate_limit_enso_x.py`: long-range extrapolation evaluation
+- `src/ensox/`: ENSO-X model, loss, metrics, and utilities
+- `configs/enso_x_24_final.yaml`: main reproducible configuration
+- `preprocess/preprocess_godas_to_ensox.py`: GODAS preprocessing
+- `preprocess/preprocess_oras5_to_ensox.py`: ORAS5 preprocessing
+- `scripts/evaluate_extreme_enso_x.py`: extreme-event evaluation
+- `scripts/evaluate_probabilistic_enso_x.py`: probabilistic pilot evaluation
 - `scripts/run_train_enso_x.sh`: training launcher
-- `scripts/run_limit_eval_enso_x.sh`: extrapolation evaluation launcher
-- `results/`: release result summaries
-
-## Environment
-
-The repository keeps three environment references:
-
-- `requirements.txt`: minimal runtime dependencies
-- `requirements-preprocess.txt`: preprocessing dependencies
-- `environment.yml`: full environment file used for the release
+- `results/`: sanitized release summaries
 
 ## Data Preparation
 
-ENSO-X expects processed data under:
+ENSO-X expects processed reanalysis data under:
 
 ```text
 data/ctefnet_data/
-  CMIP6var/
   ReanalysisVar/
     GODAS/
     ORAS5/
 ```
 
-Preprocessing converts raw CMIP6, GODAS, and ORAS5 monthly fields into normalized `npz` files on a unified grid. Monthly anomalies are computed after detrending and removing climatology. The kept scripts are:
+The preprocessing scripts convert raw monthly reanalysis fields into normalized `npz` files on a unified grid. The expected output includes predictor variables and the Niño3.4 target index for GODAS and ORAS5.
 
-- `preprocess_cmip6_to_ensox.py`
-- `preprocess_godas_to_ensox.py`
-- `preprocess_oras5_to_ensox.py`
+Variable notes:
 
-The CMIP6 list follows Table S1 after removing the two unavailable models. The released package uses:
-
-- `ACCESS-CM2`
-- `ACCESS-ESM1-5`
-- `CanESM5`
-- `CAS-ESM2-0`
-- `CESM2`
-- `CESM2-WACCM`
-- `CNRM-CM6-1`
-- `E3SM-1-0`
-- `EC-Earth3`
-- `FGOALS-g3`
-- `IPSL-CM5A2-INCA`
-- `IPSL-CM6A-LR`
-- `MIROC6`
-- `MRI-ESM2-0`
-- `NorESM2-MM`
-- `UKESM1-0-LL`
-
-The two missing CMIP6 models are:
-
-- `CMCC-ESM2`
-- `FGOALS-f3-L`
-
-Additional raw data used in preprocessing:
-
-- `GODAS`
-- `ORAS5`
-- `ERA5 mean sea level pressure (msl)`
+- GODAS variables are mapped to the common ENSO-X variable names used in the configuration.
+- ORAS5 variables are mapped to the same common names.
+- `thetao_wmean` is treated as the warm-water-volume-related thermal memory field.
+- The memory features are computed from selected tropical Pacific regions after preprocessing.
 
 ## Checkpoints
 
-Core released checkpoints used in the experiments:
+Checkpoint binaries are intentionally not stored in this repository. The released checkpoint should be kept locally and passed through:
 
-- `final_24_complete`
-- `seed_24_run`
+```bash
+export ENSOX_INIT_CKPT=/path/to/enso_x_godas24_best_frontier.ckpt
+```
 
-## Release Files
+## Quick Start
 
-- `results/enso_x_summary.json`: main result summary
-- `results/enso_x_generalization_20260425.json`: external generalization summary
-- `results/enso_x_limit_eval_20260425.json`: extrapolation summary
+Install the minimal runtime dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Set the data path and checkpoint path:
+
+```bash
+export ENSOX_DATA_ROOT=/path/to/data/ctefnet_data
+export ENSOX_INIT_CKPT=/path/to/enso_x_godas24_best_frontier.ckpt
+```
+
+Run training or fine-tuning:
+
+```bash
+bash scripts/run_train_enso_x.sh
+```
+
+Run extreme-event evaluation:
+
+```bash
+python scripts/evaluate_extreme_enso_x.py \
+  --base-config configs/enso_x_24_final.yaml \
+  --ckpt "$ENSOX_INIT_CKPT" \
+  --data-root "$ENSOX_DATA_ROOT" \
+  --output-json results/enso_x_extreme_results.json
+```
+
+Run the probabilistic pilot:
+
+```bash
+python scripts/evaluate_probabilistic_enso_x.py \
+  --base-config configs/enso_x_24_final.yaml \
+  --ckpt "$ENSOX_INIT_CKPT" \
+  --data-root "$ENSOX_DATA_ROOT" \
+  --output-json results/enso_x_probabilistic_pilot.json
+```
 
 ## Contact
 
@@ -139,6 +163,6 @@ Core released checkpoints used in the experiments:
 
 ## References
 
-- Chen, Q., Cui, Y., Hong, G. et al. *Toward long-range ENSO prediction with an explainable deep learning model*. npj Climate and Atmospheric Science 8, 259 (2025). DOI: `10.1038/s41612-025-01159-w`
-- Zhou, L., Zhang, R.-H. & Tao, L. *AI-Enabled conditional nonlinear optimal perturbation enhances ensemble prediction of extreme El Niño events*. npj Climate and Atmospheric Science 9, 30 (2026). DOI: `10.1038/s41612-025-01303-6`
-- Zhang, Z., Meng, J., Qiu, Z. et al. *Enhancing the predictability limits of ENSO with physics-guided deep echo state networks*. npj Climate and Atmospheric Science 9, 92 (2026). DOI: `10.1038/s41612-026-01360-5`
+- Chen, Q., Cui, Y., Hong, G. et al. *Toward long-range ENSO prediction with an explainable deep learning model*. npj Climate and Atmospheric Science, 2025. DOI: `10.1038/s41612-025-01159-w`
+- Zhou, L., Zhang, R.-H. & Tao, L. *AI-enabled conditional nonlinear optimal perturbation enhances ensemble prediction of extreme El Niño events*. npj Climate and Atmospheric Science, 2026. DOI: `10.1038/s41612-025-01303-6`
+- Zhang, Z., Meng, J., Qiu, Z. et al. *Enhancing the predictability limits of ENSO with physics-guided deep echo state networks*. npj Climate and Atmospheric Science, 2026. DOI: `10.1038/s41612-026-01360-5`

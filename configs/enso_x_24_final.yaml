@@ -1,4 +1,5 @@
 seed: 0
+
 model:
   name: ENSOX
   dim: 256
@@ -11,6 +12,7 @@ model:
   init_ckpt: ${ENSOX_INIT_CKPT:-}
   init_ckpt_optional: true
   init_ckpt_strict: false
+
   memory_mode: hybrid_dual
   dual_memory_hidden: 192
   memory_driver_wind_idx: 1
@@ -21,15 +23,18 @@ model:
   memory_residual_scale: 0.6937425368468315
   memory_bridge_scale: 0.44859490144431724
   memory_fusion_alpha: 0.018786307127162914
+
   gate_mode: fixed_one
   use_month_embedding: false
   use_lead_embedding: false
   legacy_skip_enabled: true
   legacy_skip_alpha: 1.3416129653798388
+
   long_head_enabled: true
   long_head_start: 11
   long_head_end: 20
   long_head_scale: 0.15298089193558717
+
   lead_refiner_enabled: true
   lead_refiner_start: 10
   lead_refiner_layers: 4
@@ -37,6 +42,7 @@ model:
   lead_refiner_scale: -2.2496541997055073
   lead_refiner_iters: 3
   lead_refiner_ffn: 512
+
   ms_refiner_enabled: true
   ms_refiner_start: 13
   ms_refiner_layers: 4
@@ -44,24 +50,18 @@ model:
   ms_refiner_scale: -3.3733947928859958
   ms_refiner_iters: 1
   ms_refiner_kernel: 5
-  rollout_refiner_enabled: false
-  rollout_refiner_start: 10
-  rollout_refiner_hidden: 256
-  rollout_refiner_scale: -1.0456275181452985
-  rollout_refiner_detach_prev: true
+
   barrier_head_enabled: true
   barrier_head_start: 8
   barrier_head_end: 10
   barrier_head_scale: -1.6865287524375872
-  tail_booster_enabled: false
-  tail_booster_start: 21
-  tail_booster_hidden: 256
-  tail_booster_scale: -1.3477083781526165
+
   barrier_booster_enabled: true
   barrier_booster_start: 8
   barrier_booster_end: 10
   barrier_booster_hidden: 256
   barrier_booster_scale: 0.06401479027506765
+
   barrier_bridge_enabled: true
   barrier_bridge_start: 9
   barrier_bridge_end: 9
@@ -69,6 +69,7 @@ model:
   barrier_bridge_hidden: 256
   barrier_bridge_layers: 1
   barrier_bridge_scale: -0.6751377784767671
+
   prefix_bridge_enabled: true
   prefix_bridge_start: 8
   prefix_bridge_end: 11
@@ -76,58 +77,69 @@ model:
   prefix_bridge_hidden: 256
   prefix_bridge_layers: 1
   prefix_bridge_scale: -0.4530887766768089
+
   hole_interp_enabled: true
   hole_interp_lead: 9
   hole_interp_context: 1
   hole_interp_scale: 0.6427276281433125
+  hole_interp_start: 9
+  hole_interp_end: 11
+
   hole_patch_enabled: true
   hole_patch_lead: 9
   hole_patch_context: 2
   hole_patch_hidden: 192
   hole_patch_scale: -0.3375370438678349
-  hole_interp_start: 9
-  hole_interp_end: 11
+
+  regional_ridge_enabled: true
+  regional_ridge_scale: 5.0
+  legal_analog_enabled: true
+  legal_analog_scale: 12.0
+  legal_analog_topk: 3
+  legal_analog_blend: 0.35
+  legal_analog_power: 0.5
+
 data:
   predictor:
-  - thetao_5
-  - thetao_wmean
-  - tauu
-  - tauv
-  - uo_5
-  - vo_5
-  - psl
-  - mlotst
-  - sos
+    - thetao_5
+    - thetao_wmean
+    - tauu
+    - tauv
+    - uo_5
+    - vo_5
+    - psl
+    - mlotst
+    - sos
   predictand:
-  - nino34
+    - nino34
   train_models:
-  - GODAS
+    - GODAS
   train_period:
-  - 1980
-  - 2014
+    - 1980
+    - 2014
   valid_models:
-  - GODAS
+    - GODAS
   valid_period:
-  - 2015
-  - 2021
+    - 2015
+    - 2021
   source_replay:
     enabled: true
     models:
-    - ORAS5
+      - ORAS5
     period:
-    - 1980
-    - 2014
+      - 1958
+      - 1978
     repeat: 2
   input_region:
-  - 0
-  - 120
-  - 0
-  - 180
+    - 0
+    - 120
+    - 0
+    - 180
   target_region:
-  - 54
-  - 64
-  - 95
-  - 120
+    - 54
+    - 64
+    - 95
+    - 120
   obs_time: 12
   pred_type: series
   pred_time: 24
@@ -136,35 +148,22 @@ data:
   num_workers: 0
   data_root: ${ENSOX_DATA_ROOT:-./data/ctefnet_data}
   memory_features:
-  - name: wwv_proxy
-    var: thetao_wmean
-    region:
-    - 54
-    - 66
-    - 80
-    - 130
-    op: mean
-  - name: trade_wind
-    var: tauu
-    region:
-    - 55
-    - 65
-    - 70
-    - 130
-    op: mean
-  - name: sst_basin_mean
-    var: thetao_5
-    region:
-    - 0
-    - 120
-    - 0
-    - 180
-    op: mean
+    - name: wwv_proxy
+      var: thetao_wmean
+      region: [54, 66, 80, 130]
+      op: mean
+    - name: trade_wind
+      var: tauu
+      region: [55, 65, 70, 130]
+      op: mean
+    - name: sst_basin_mean
+      var: thetao_5
+      region: [0, 120, 0, 180]
+      op: mean
+
 optimizer:
   epoch: 40
-  lr_range:
-  - 8.0e-08
-  - 7.0e-07
+  lr_range: [8.0e-08, 7.0e-07]
   lr: 2.2e-07
   min_lr: 2.0e-08
   weight_decay: 5.0e-05
@@ -174,96 +173,40 @@ optimizer:
   restart_tmult: 1
   l2sp_lambda: 0.024
   train_patterns:
-  - hole_interp_scale
-  - hole_patch_proj
-  - hole_patch_head
-  - hole_patch_gate
-  - hole_patch_scale
-  lr_multipliers:
-    lead_refiner: 1.35
-    index_token_proj: 1.4
-    memory_token_proj: 1.35
-    refiner_head: 1.45
-    refiner_gate: 1.35
-    lead_refiner_scale: 1.3
-    ms_refiner: 1.35
-    ms_index_proj: 1.4
-    ms_memory_proj: 1.35
-    ms_head: 1.45
-    ms_gate: 1.35
-    ms_refiner_scale: 1.3
-    rollout_in_proj: 1.3
-    rollout_cell: 1.3
-    rollout_norm: 1.25
-    rollout_head: 1.45
-    rollout_gate: 1.35
-    rollout_refiner_scale: 1.35
-    tail_booster_proj: 1.3
-    tail_booster_conv: 1.3
-    tail_booster_norm: 1.25
-    tail_booster_head: 1.5
-    tail_booster_gate: 1.4
-    tail_booster_scale: 1.4
-    barrier_booster_proj: 1.4
-    barrier_booster_conv: 1.4
-    barrier_booster_norm: 1.3
-    barrier_booster_head: 1.55
-    barrier_booster_gate: 1.45
-    barrier_booster_scale: 1.5
-    barrier_bridge_proj: 1.35
-    barrier_bridge_rnn: 1.4
-    barrier_bridge_norm: 1.25
-    barrier_bridge_head: 1.55
-    barrier_bridge_gate: 1.45
-    barrier_bridge_scale: 1.45
-    prefix_bridge_proj: 1.35
-    prefix_bridge_rnn: 1.4
-    prefix_bridge_norm: 1.25
-    prefix_bridge_head: 1.6
-    prefix_bridge_gate: 1.48
-    prefix_bridge_scale: 1.5
-    hole_interp_scale: 10.0
-    hole_patch_proj: 12.0
-    hole_patch_head: 20.0
-    hole_patch_gate: 16.0
-    hole_patch_scale: 18.0
-    long_head: 1.35
-    long_head_gate: 1.35
-    long_scale: 1.35
-    barrier_head: 1.4
-    barrier_gate: 1.35
-    barrier_scale: 1.35
-    deep_head: 1.25
+    - hole_interp_scale
+    - hole_patch_proj
+    - hole_patch_head
+    - hole_patch_gate
+    - hole_patch_scale
+    - legal_analog_scale
+
 loss:
   lead_weights:
-  - 0.9
-  - 0.9
-  - 0.9
-  - 0.9
-  - 0.9
-  - 0.9
-  - 1.1
-  - 8.601512935033506
-  - 33.95959051099955
-  - 14.803765023777036
-  - 8.060982923473196
-  - 2.3145448448140793
-  - 2.2
-  - 2.2
-  - 2.2
-  - 2.2
-  - 3.2
-  - 3.2
-  - 3.2
-  - 3.6528132599533367
-  - 4.337715746194587
-  - 4.867514364386234
-  - 5.267457893744222
-  - 6.1239028435942275
-  spring_months:
-  - 2
-  - 3
-  - 4
+    - 0.9
+    - 0.9
+    - 0.9
+    - 0.9
+    - 0.9
+    - 0.9
+    - 1.1
+    - 8.601512935033506
+    - 33.95959051099955
+    - 14.803765023777036
+    - 8.060982923473196
+    - 2.3145448448140793
+    - 2.2
+    - 2.2
+    - 2.2
+    - 2.2
+    - 3.2
+    - 3.2
+    - 3.2
+    - 3.6528132599533367
+    - 4.337715746194587
+    - 4.867514364386234
+    - 5.267457893744222
+    - 6.1239028435942275
+  spring_months: [2, 3, 4]
   spring_boost: 2.103188727666864
   lambda_memory: 0.28
   lambda_corr: 1.132649946579599
@@ -289,22 +232,21 @@ loss:
   whm_wind_idx: 1
   whm_sst_idx: 2
   whm_alpha: 0.7
+
 summary:
   save_dir: ${ENSOX_OUTPUT_ROOT:-./outputs/checkpoints}
-  exp_name: enso_x_manual_24_window_repro
+  exp_name: enso_x_24_final
   save_last: true
   early_stop_patience: 12
   early_stop_min_improve: 0.002
-  monitor_metric: leading
+  monitor_metric: frontier
   monitor_min_improve: 0.0
   lead_tie_score_min_improve: 0.001
-  search_regime: manual_window_patch
-  search_stagnation: 0
   lead_threshold: 0.5
   positive_threshold: 0.0
-  frontier_target: 12
+  frontier_target: 24
   positive_target: 24
-  search_target_mode: leading
+
 eval_ensemble:
   enabled: false
   members: 1

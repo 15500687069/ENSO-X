@@ -1,0 +1,33 @@
+{
+  "dataset": "GODAS",
+  "validation_period": "2015-2021",
+  "method": "21-member initial-condition perturbation ensemble using one fixed ENSO-X checkpoint",
+  "members": 21,
+  "field_sigma": 0.08,
+  "memory_sigma": 0.25,
+  "ic_steps": 12,
+  "deterministic": {
+    "frontier_prefix": 24,
+    "min_corr": 0.5128740072250366,
+    "mean_corr": 0.6783871650695801
+  },
+  "ensemble_mean": {
+    "frontier_prefix": 24,
+    "min_corr": 0.5145757794380188,
+    "mean_corr": 0.6765002608299255
+  },
+  "probabilistic_metrics": {
+    "warm_event_brier": 0.1564972996711731,
+    "warm_event_deterministic_brier": 0.19302721321582794,
+    "cold_event_brier": 0.1651241034269333,
+    "cold_event_deterministic_brier": 0.19302721321582794,
+    "crps_mean": 0.076108917593956,
+    "spread_mean": 0.04167525842785835,
+    "rmse_mean": 0.11247652769088745,
+    "spread_rmse_ratio": 0.3705240488052368,
+    "coverage_50": 0.14795918762683868,
+    "coverage_80": 0.2984693944454193,
+    "coverage_90": 0.34778910875320435
+  },
+  "note": "The ensemble keeps 24-month deterministic skill and improves event Brier scores, but the prediction intervals are under-dispersive. Probability calibration is a future improvement target."
+}

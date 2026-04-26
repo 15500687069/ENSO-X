@@ -35,7 +35,7 @@ DEPTH_DIM_CANDS = ("level", "lev", "depth", "olevel", "z_t", "st_ocean")
 LAT_DIM_CANDS = ("lat", "latitude", "y")
 LON_DIM_CANDS = ("lon", "longitude", "x")
 
-# Keep same behavior style as CMIP preprocessing.
+# Keep preprocessing behavior consistent across reanalysis products.
 NO_FILL_VARS = {"msl", "tau_x", "tau_y"}
 
 

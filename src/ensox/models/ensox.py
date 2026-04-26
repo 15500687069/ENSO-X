@@ -372,6 +372,41 @@ class ENSOX(nn.Module):
         prefix_bridge_hidden=0,
         prefix_bridge_layers=1,
         prefix_bridge_scale=-0.7,
+        prefix_chain_enabled=False,
+        prefix_chain_start=5,
+        prefix_chain_end=12,
+        prefix_chain_hidden=0,
+        prefix_chain_scale=-0.8,
+        prefix_chain_detach_prev=False,
+        prefix_band_enabled=False,
+        prefix_band_start=5,
+        prefix_band_end=12,
+        prefix_band_hidden=0,
+        prefix_band_layers=2,
+        prefix_band_scale=-0.7,
+        prefix_direct_enabled=False,
+        prefix_direct_start=7,
+        prefix_direct_end=12,
+        prefix_direct_hidden=0,
+        prefix_direct_layers=2,
+        prefix_direct_scale=-0.4,
+        prefix_direct_mode="residual",
+        lead_mixer_enabled=False,
+        lead_mixer_start=8,
+        lead_mixer_end=24,
+        lead_mixer_hidden=16,
+        lead_mixer_kernel=7,
+        lead_mixer_scale=-0.7,
+        regional_ridge_enabled=False,
+        regional_ridge_scale=4.0,
+        legal_analog_enabled=False,
+        legal_analog_scale=8.0,
+        legal_analog_topk=3,
+        legal_analog_blend=0.35,
+        legal_analog_power=0.5,
+        legal_analog_distance_gate_enabled=False,
+        legal_analog_distance_threshold=0.0,
+        legal_analog_distance_temperature=1.0,
         hole_interp_enabled=False,
         hole_interp_lead=9,
         hole_interp_start=0,
@@ -398,6 +433,13 @@ class ENSOX(nn.Module):
         memory_cross_attn_heads=4,
         memory_residual_scale=0.8,
         memory_bridge_scale=0.2,
+        warm_growth_enabled=False,
+        warm_growth_start=8,
+        warm_growth_end=24,
+        warm_growth_context=2,
+        warm_growth_hidden=0,
+        warm_growth_layers=1,
+        warm_growth_scale=-1.2,
     ):
         super().__init__()
         self.obs_time = obs_time
@@ -417,6 +459,18 @@ class ENSOX(nn.Module):
         self.barrier_booster_enabled = bool(barrier_booster_enabled)
         self.barrier_bridge_enabled = bool(barrier_bridge_enabled)
         self.prefix_bridge_enabled = bool(prefix_bridge_enabled)
+        self.prefix_chain_enabled = bool(prefix_chain_enabled)
+        self.prefix_chain_detach_prev = bool(prefix_chain_detach_prev)
+        self.prefix_band_enabled = bool(prefix_band_enabled)
+        self.prefix_direct_enabled = bool(prefix_direct_enabled)
+        self.prefix_direct_mode = str(prefix_direct_mode).lower().strip()
+        self.lead_mixer_enabled = bool(lead_mixer_enabled)
+        self.regional_ridge_enabled = bool(regional_ridge_enabled)
+        self.legal_analog_enabled = bool(legal_analog_enabled)
+        self.legal_analog_topk = max(1, int(legal_analog_topk))
+        self.legal_analog_distance_gate_enabled = bool(legal_analog_distance_gate_enabled)
+        self.legal_analog_distance_threshold = float(legal_analog_distance_threshold)
+        self.legal_analog_distance_temperature = max(float(legal_analog_distance_temperature), 1.0e-6)
         self.hole_interp_enabled = bool(hole_interp_enabled)
         self.hole_patch_enabled = bool(hole_patch_enabled)
         self.memory_fusion_alpha = float(memory_fusion_alpha)
@@ -427,6 +481,7 @@ class ENSOX(nn.Module):
         self.legacy_skip_alpha = float(legacy_skip_alpha)
         self.memory_mode = str(memory_mode).lower().strip()
         self.memory_cross_attn_enabled = bool(memory_cross_attn_enabled)
+        self.warm_growth_enabled = bool(warm_growth_enabled)
 
         self.field_encoder = FieldEncoder(in_channels=in_channels, dim=dim)
         self.field_norm = nn.LayerNorm(dim)
@@ -877,6 +932,218 @@ class ENSOX(nn.Module):
             self.prefix_bridge_window_end = 0
             self.prefix_bridge_scale = None
 
+        if self.prefix_chain_enabled:
+            prefix_chain_hidden = int(prefix_chain_hidden) if int(prefix_chain_hidden) > 0 else max(int(dim) // 2, int(num_index) * 16)
+            self.prefix_chain_proj = nn.Sequential(
+                nn.Linear(dim + memory_dim + num_index * 5, prefix_chain_hidden),
+                nn.GELU(),
+            )
+            self.prefix_chain_cell = nn.GRUCell(prefix_chain_hidden, prefix_chain_hidden)
+            self.prefix_chain_norm = nn.LayerNorm(prefix_chain_hidden)
+            self.prefix_chain_head = nn.Linear(prefix_chain_hidden, num_index)
+            self.prefix_chain_gate = nn.Sequential(
+                nn.Linear(prefix_chain_hidden, num_index),
+                nn.Sigmoid(),
+            )
+            nn.init.normal_(self.prefix_chain_head.weight, mean=0.0, std=0.01)
+            nn.init.zeros_(self.prefix_chain_head.bias)
+            nn.init.zeros_(self.prefix_chain_gate[0].weight)
+            nn.init.constant_(self.prefix_chain_gate[0].bias, -0.2)
+            prefix_chain_start = max(1, int(prefix_chain_start))
+            prefix_chain_end = max(prefix_chain_start, int(prefix_chain_end))
+            prefix_chain_mask = torch.zeros((1, num_index, pred_time), dtype=torch.float32)
+            prefix_chain_mask[:, :, prefix_chain_start - 1 : min(prefix_chain_end, pred_time)] = 1.0
+            self.register_buffer("prefix_chain_mask", prefix_chain_mask, persistent=False)
+            self.prefix_chain_scale = nn.Parameter(torch.tensor(float(prefix_chain_scale), dtype=torch.float32))
+        else:
+            self.prefix_chain_proj = None
+            self.prefix_chain_cell = None
+            self.prefix_chain_norm = None
+            self.prefix_chain_head = None
+            self.prefix_chain_gate = None
+            self.prefix_chain_mask = None
+            self.prefix_chain_scale = None
+
+        if self.prefix_band_enabled:
+            prefix_band_hidden = int(prefix_band_hidden) if int(prefix_band_hidden) > 0 else max(int(dim) // 2, int(num_index) * 32)
+            self.prefix_band_proj = nn.Sequential(
+                nn.Linear(dim + memory_dim + num_index * 6, prefix_band_hidden),
+                nn.GELU(),
+                nn.LayerNorm(prefix_band_hidden),
+            )
+            self.prefix_band_mix = MultiScaleLeadRefiner(
+                prefix_band_hidden,
+                heads=max(1, min(4, int(head))),
+                layers=max(1, int(prefix_band_layers)),
+                kernel_size=3,
+                dropout=dropout,
+            )
+            self.prefix_band_head = nn.Linear(prefix_band_hidden, num_index)
+            self.prefix_band_gate = nn.Sequential(
+                nn.Linear(prefix_band_hidden, num_index),
+                nn.Tanh(),
+            )
+            nn.init.normal_(self.prefix_band_head.weight, mean=0.0, std=0.01)
+            nn.init.zeros_(self.prefix_band_head.bias)
+            nn.init.zeros_(self.prefix_band_gate[0].weight)
+            nn.init.constant_(self.prefix_band_gate[0].bias, -0.2)
+            prefix_band_start = max(1, int(prefix_band_start))
+            prefix_band_end = max(prefix_band_start, int(prefix_band_end))
+            prefix_band_mask = torch.zeros((1, num_index, pred_time), dtype=torch.float32)
+            prefix_band_mask[:, :, prefix_band_start - 1 : min(prefix_band_end, pred_time)] = 1.0
+            self.register_buffer("prefix_band_mask", prefix_band_mask, persistent=False)
+            self.prefix_band_window_start = prefix_band_start - 1
+            self.prefix_band_window_end = min(prefix_band_end, pred_time)
+            self.prefix_band_scale = nn.Parameter(torch.tensor(float(prefix_band_scale), dtype=torch.float32))
+        else:
+            self.prefix_band_proj = None
+            self.prefix_band_mix = None
+            self.prefix_band_head = None
+            self.prefix_band_gate = None
+            self.prefix_band_mask = None
+            self.prefix_band_window_start = 0
+            self.prefix_band_window_end = 0
+            self.prefix_band_scale = None
+
+        if self.prefix_direct_enabled:
+            prefix_direct_hidden = int(prefix_direct_hidden) if int(prefix_direct_hidden) > 0 else max(int(dim) // 2, int(num_index) * 32)
+            prefix_direct_season_dim = 4
+            self.prefix_direct_proj = nn.Sequential(
+                nn.Linear(dim + memory_dim + num_index * 5 + prefix_direct_season_dim, prefix_direct_hidden),
+                nn.GELU(),
+                nn.LayerNorm(prefix_direct_hidden),
+            )
+            self.prefix_direct_mix = MultiScaleLeadRefiner(
+                prefix_direct_hidden,
+                heads=max(1, min(4, int(head))),
+                layers=max(1, int(prefix_direct_layers)),
+                kernel_size=3,
+                dropout=dropout,
+            )
+            self.prefix_direct_head = nn.Linear(prefix_direct_hidden, num_index)
+            self.prefix_direct_gate = nn.Sequential(
+                nn.Linear(prefix_direct_hidden, num_index),
+                nn.Sigmoid(),
+            )
+            nn.init.zeros_(self.prefix_direct_head.weight)
+            nn.init.zeros_(self.prefix_direct_head.bias)
+            nn.init.zeros_(self.prefix_direct_gate[0].weight)
+            if self.prefix_direct_mode in ("blend", "replace", "override"):
+                nn.init.constant_(self.prefix_direct_gate[0].bias, -2.0)
+            else:
+                nn.init.constant_(self.prefix_direct_gate[0].bias, 1.0)
+            prefix_direct_start = max(1, int(prefix_direct_start))
+            prefix_direct_end = max(prefix_direct_start, int(prefix_direct_end))
+            prefix_direct_mask = torch.zeros((1, num_index, pred_time), dtype=torch.float32)
+            prefix_direct_mask[:, :, prefix_direct_start - 1 : min(prefix_direct_end, pred_time)] = 1.0
+            self.register_buffer("prefix_direct_mask", prefix_direct_mask, persistent=False)
+            self.prefix_direct_window_start = prefix_direct_start - 1
+            self.prefix_direct_window_end = min(prefix_direct_end, pred_time)
+            self.prefix_direct_scale = nn.Parameter(torch.tensor(float(prefix_direct_scale), dtype=torch.float32))
+        else:
+            self.prefix_direct_proj = None
+            self.prefix_direct_mix = None
+            self.prefix_direct_head = None
+            self.prefix_direct_gate = None
+            self.prefix_direct_mask = None
+            self.prefix_direct_window_start = 0
+            self.prefix_direct_window_end = 0
+            self.prefix_direct_scale = None
+
+        if self.lead_mixer_enabled:
+            lm_hidden = max(2, int(lead_mixer_hidden))
+            lm_kernel = max(3, int(lead_mixer_kernel))
+            if lm_kernel % 2 == 0:
+                lm_kernel += 1
+            lm_pad = lm_kernel // 2
+            self.lead_mixer = nn.Sequential(
+                nn.Conv1d(num_index, lm_hidden, kernel_size=lm_kernel, padding=lm_pad),
+                nn.GELU(),
+                nn.Conv1d(lm_hidden, num_index, kernel_size=lm_kernel, padding=lm_pad),
+            )
+            nn.init.zeros_(self.lead_mixer[-1].weight)
+            nn.init.zeros_(self.lead_mixer[-1].bias)
+            lm_start = max(1, int(lead_mixer_start))
+            lm_end = max(lm_start, int(lead_mixer_end))
+            lm_mask = torch.zeros((1, num_index, pred_time), dtype=torch.float32)
+            lm_mask[:, :, lm_start - 1 : min(lm_end, pred_time)] = 1.0
+            self.register_buffer("lead_mixer_mask", lm_mask, persistent=False)
+            self.lead_mixer_scale = nn.Parameter(torch.tensor(float(lead_mixer_scale), dtype=torch.float32))
+        else:
+            self.lead_mixer = None
+            self.lead_mixer_mask = None
+            self.lead_mixer_scale = None
+
+        if self.regional_ridge_enabled:
+            # 4 memory summaries + 8 regional field summaries + 12 month indicators.
+            ridge_dim = (obs_time * memory_in_dim) + (memory_in_dim * 3) + 8 * ((obs_time * in_channels) + in_channels * 2) + 12
+            self.regional_ridge_head = nn.Linear(ridge_dim, pred_time * num_index)
+            self.regional_ridge_scale = nn.Parameter(torch.tensor(float(regional_ridge_scale), dtype=torch.float32))
+            regions = torch.tensor(
+                [
+                    [0, 120, 0, 180],
+                    [54, 66, 80, 130],
+                    [54, 64, 95, 120],
+                    [54, 66, 70, 95],
+                    [54, 66, 110, 140],
+                    [45, 75, 80, 140],
+                    [35, 55, 90, 130],
+                    [65, 85, 90, 130],
+                ],
+                dtype=torch.long,
+            )
+            self.register_buffer("regional_ridge_regions", regions, persistent=False)
+        else:
+            self.regional_ridge_head = None
+            self.regional_ridge_scale = None
+            self.regional_ridge_regions = None
+
+        if self.legal_analog_enabled:
+            self.legal_analog_scale = nn.Parameter(torch.tensor(float(legal_analog_scale), dtype=torch.float32))
+            regions = torch.tensor(
+                [
+                    [0, 120, 0, 180],
+                    [54, 66, 80, 130],
+                    [54, 64, 95, 120],
+                    [54, 66, 70, 95],
+                    [54, 66, 110, 140],
+                    [45, 75, 80, 140],
+                    [35, 55, 90, 130],
+                    [65, 85, 90, 130],
+                    [45, 65, 60, 95],
+                    [45, 65, 120, 160],
+                    [50, 70, 75, 105],
+                    [50, 70, 105, 135],
+                    [20, 50, 80, 140],
+                    [70, 100, 80, 140],
+                    [54, 66, 0, 60],
+                    [54, 66, 140, 180],
+                ],
+                dtype=torch.long,
+            )
+            self.register_buffer("legal_analog_regions", regions, persistent=False)
+            self.register_buffer("legal_analog_mean", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_std", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_ridge_weight", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_ridge_bias", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_pca_vt", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_proto", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_targets", torch.empty(0, dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_blend", torch.tensor(float(legal_analog_blend), dtype=torch.float32), persistent=True)
+            self.register_buffer("legal_analog_power", torch.tensor(float(legal_analog_power), dtype=torch.float32), persistent=True)
+        else:
+            self.legal_analog_scale = None
+            self.legal_analog_regions = None
+            self.legal_analog_mean = None
+            self.legal_analog_std = None
+            self.legal_analog_ridge_weight = None
+            self.legal_analog_ridge_bias = None
+            self.legal_analog_pca_vt = None
+            self.legal_analog_proto = None
+            self.legal_analog_targets = None
+            self.legal_analog_blend = None
+            self.legal_analog_power = None
+
         if self.hole_interp_enabled:
             interp_start = int(hole_interp_start) if int(hole_interp_start) > 0 else int(hole_interp_lead)
             interp_end = int(hole_interp_end) if int(hole_interp_end) > 0 else int(hole_interp_lead)
@@ -946,6 +1213,158 @@ class ENSOX(nn.Module):
             self.hole_patch_index = 0
             self.hole_patch_context = 1
             self.hole_patch_scale = None
+
+        if self.warm_growth_enabled:
+            warm_hidden = int(warm_growth_hidden) if int(warm_growth_hidden) > 0 else max(int(dim) // 2, int(num_index) * 16)
+            warm_layers = max(1, int(warm_growth_layers))
+            warm_in_dim = int(dim + memory_dim + num_index * 5)
+            self.warm_growth_proj = nn.Sequential(
+                nn.Linear(warm_in_dim, warm_hidden),
+                nn.GELU(),
+                nn.LayerNorm(warm_hidden),
+            )
+            self.warm_growth_rnn = nn.GRU(
+                input_size=warm_hidden,
+                hidden_size=warm_hidden,
+                num_layers=warm_layers,
+                batch_first=True,
+                dropout=dropout if warm_layers > 1 else 0.0,
+                bidirectional=True,
+            )
+            self.warm_growth_norm = nn.LayerNorm(warm_hidden * 2)
+            self.warm_growth_head = nn.Linear(warm_hidden * 2, num_index)
+            self.warm_growth_gate = nn.Sequential(
+                nn.Linear(warm_hidden * 2, num_index),
+                nn.Sigmoid(),
+            )
+            nn.init.zeros_(self.warm_growth_head.weight)
+            nn.init.zeros_(self.warm_growth_head.bias)
+            nn.init.constant_(self.warm_growth_gate[0].bias, -1.6)
+            wg_start = max(1, int(warm_growth_start))
+            wg_end = max(wg_start, int(warm_growth_end))
+            wg_context = max(1, int(warm_growth_context))
+            wg_mask = torch.zeros((1, 1, pred_time), dtype=torch.float32)
+            wg_mask[:, :, wg_start - 1 : min(wg_end, pred_time)] = 1.0
+            self.register_buffer("warm_growth_mask", wg_mask, persistent=False)
+            self.warm_growth_window_start = max(0, wg_start - 1 - wg_context)
+            self.warm_growth_window_end = min(pred_time, wg_end + wg_context)
+            self.warm_growth_scale = nn.Parameter(torch.tensor(float(warm_growth_scale), dtype=torch.float32))
+            self.warm_context_norm = nn.LayerNorm(warm_hidden * 4)
+            self.warm_event_head = nn.Linear(warm_hidden * 4, 1)
+            self.warm_peak_head = nn.Linear(warm_hidden * 4, num_index)
+            self.warm_timing_head = nn.Linear(warm_hidden * 4, pred_time)
+            nn.init.constant_(self.warm_event_head.bias, -2.0)
+        else:
+            self.warm_growth_proj = None
+            self.warm_growth_rnn = None
+            self.warm_growth_norm = None
+            self.warm_growth_head = None
+            self.warm_growth_gate = None
+            self.warm_growth_mask = None
+            self.warm_growth_window_start = 0
+            self.warm_growth_window_end = 0
+            self.warm_growth_scale = None
+            self.warm_context_norm = None
+            self.warm_event_head = None
+            self.warm_peak_head = None
+            self.warm_timing_head = None
+
+    def _legal_analog_ready(self):
+        return (
+            self.legal_analog_enabled
+            and self.legal_analog_mean is not None
+            and int(self.legal_analog_mean.numel()) > 0
+            and int(self.legal_analog_proto.numel()) > 0
+            and int(self.legal_analog_targets.numel()) > 0
+        )
+
+    def _legal_analog_features(self, x_field, x_memory, init_month):
+        bsz = x_field.size(0)
+        feats = [
+            x_memory.reshape(bsz, -1),
+            x_memory[:, -1, :],
+            x_memory.mean(dim=1),
+            x_memory.std(dim=1, unbiased=False),
+            x_memory[:, -1, :] - x_memory[:, 0, :],
+            x_memory.amax(dim=1),
+            x_memory.amin(dim=1),
+        ]
+        t = torch.arange(x_field.size(1), device=x_field.device, dtype=x_field.dtype)
+        t_center = t - t.mean()
+        denom = torch.sum(t_center * t_center).clamp_min(1.0e-6)
+        for r in self.legal_analog_regions:
+            lat0, lat1, lon0, lon1 = [int(v.item()) for v in r]
+            patch = x_field[:, :, :, lat0:lat1, lon0:lon1]
+            series = patch.mean(dim=(-1, -2))
+            series_mean = series.mean(dim=1)
+            slope = ((series - series_mean.unsqueeze(1)) * t_center.view(1, -1, 1)).sum(dim=1) / denom
+            feats.extend(
+                [
+                    series.reshape(bsz, -1),
+                    series[:, -1, :],
+                    series_mean,
+                    series.std(dim=1, unbiased=False),
+                    series[:, -1, :] - series[:, 0, :],
+                    series.amax(dim=1),
+                    series.amin(dim=1),
+                    slope,
+                    series[:, -3:, :].mean(dim=1) - series[:, :3, :].mean(dim=1),
+                ]
+            )
+        month_oh = F.one_hot(init_month.to(torch.long), num_classes=12).to(dtype=x_field.dtype, device=x_field.device)
+        feats.append(month_oh)
+        return torch.cat(feats, dim=-1)
+
+    def _legal_analog_predict(self, x_field, x_memory, init_month):
+        feat = self._legal_analog_features(x_field, x_memory, init_month)
+        mean = self.legal_analog_mean.to(device=feat.device, dtype=feat.dtype)
+        std = self.legal_analog_std.to(device=feat.device, dtype=feat.dtype).clamp_min(1.0e-6)
+        z = torch.clamp((feat - mean) / std, min=-5.0, max=5.0)
+
+        weight = self.legal_analog_ridge_weight.to(device=feat.device, dtype=feat.dtype)
+        bias = self.legal_analog_ridge_bias.to(device=feat.device, dtype=feat.dtype)
+        ridge_pred = z.matmul(weight) + bias
+
+        pca_vt = self.legal_analog_pca_vt.to(device=feat.device, dtype=feat.dtype)
+        proto = self.legal_analog_proto.to(device=feat.device, dtype=feat.dtype)
+        targets = self.legal_analog_targets.to(device=feat.device, dtype=feat.dtype)
+        pca_feat = z.matmul(pca_vt.transpose(0, 1))
+        diff = pca_feat.unsqueeze(1) - proto.unsqueeze(0)
+        dist2 = torch.sum(diff * diff, dim=-1)
+        k = min(int(self.legal_analog_topk), int(proto.size(0)))
+        knn_dist, knn_idx = torch.topk(dist2, k=k, dim=1, largest=False)
+        power = self.legal_analog_power.to(device=feat.device, dtype=feat.dtype).clamp_min(0.05)
+        knn_w = torch.pow(knn_dist + 1.0e-6, -power)
+        knn_w = knn_w / knn_w.sum(dim=1, keepdim=True).clamp_min(1.0e-6)
+        knn_targets = targets[knn_idx]
+        knn_pred = torch.sum(knn_targets * knn_w.unsqueeze(-1), dim=1)
+
+        blend = self.legal_analog_blend.to(device=feat.device, dtype=feat.dtype).clamp(0.0, 1.0)
+        analog_pred = blend * ridge_pred + (1.0 - blend) * knn_pred
+        reliability = None
+        if self.legal_analog_distance_gate_enabled:
+            nearest_dist = torch.sqrt(knn_dist[:, 0].clamp_min(0.0))
+            threshold = feat.new_tensor(float(self.legal_analog_distance_threshold))
+            temperature = feat.new_tensor(float(self.legal_analog_distance_temperature)).clamp_min(1.0e-6)
+            reliability = torch.sigmoid((threshold - nearest_dist) / temperature).view(-1, 1, 1)
+        return analog_pred.view(-1, self.num_index, self.pred_time), reliability
+
+    def _regional_ridge_features(self, x_field, x_memory, init_month):
+        bsz = x_field.size(0)
+        feats = [
+            x_memory.reshape(bsz, -1),
+            x_memory[:, -1, :],
+            x_memory.mean(dim=1),
+            x_memory[:, -1, :] - x_memory[:, 0, :],
+        ]
+        for r in self.regional_ridge_regions:
+            lat0, lat1, lon0, lon1 = [int(v.item()) for v in r]
+            patch = x_field[:, :, :, lat0:lat1, lon0:lon1]
+            series = patch.mean(dim=(-1, -2))
+            feats.extend([series.reshape(bsz, -1), series[:, -1, :], series[:, -1, :] - series[:, 0, :]])
+        month_oh = F.one_hot(init_month.to(torch.long), num_classes=12).to(dtype=x_field.dtype, device=x_field.device)
+        feats.append(month_oh)
+        return torch.cat(feats, dim=-1)
 
     def _build_memory_branches(self, x_memory, init_month):
         # Baseline SSM branch.
@@ -1047,6 +1466,21 @@ class ENSOX(nn.Module):
                 ).transpose(1, 2)
             skip = self.encoder_head(legacy_tokens.flatten(1)).view(-1, self.num_index, self.pred_time)
             index_pred = index_pred + self.legacy_skip_alpha * skip
+
+        regional_ridge_pred = None
+        if self.regional_ridge_enabled:
+            ridge_feat = self._regional_ridge_features(x_field, x_memory, init_month)
+            regional_ridge_pred = self.regional_ridge_head(ridge_feat).view(-1, self.num_index, self.pred_time)
+            ridge_alpha = torch.sigmoid(self.regional_ridge_scale)
+            index_pred = index_pred + ridge_alpha * (regional_ridge_pred - index_pred)
+
+        legal_analog_pred = None
+        if self._legal_analog_ready():
+            legal_analog_pred, analog_reliability = self._legal_analog_predict(x_field, x_memory, init_month)
+            analog_alpha = torch.sigmoid(self.legal_analog_scale)
+            if analog_reliability is not None:
+                analog_alpha = analog_alpha * analog_reliability
+            index_pred = index_pred + analog_alpha * (legal_analog_pred - index_pred)
 
         long_res = None
         long_gate = None
@@ -1251,6 +1685,158 @@ class ENSOX(nn.Module):
             )
             index_pred = index_pred + prefix_bridge_term
 
+        prefix_chain_res = None
+        prefix_chain_gate = None
+        if self.prefix_chain_enabled:
+            h = torch.zeros(
+                bsz,
+                int(self.prefix_chain_cell.hidden_size),
+                device=index_pred.device,
+                dtype=index_pred.dtype,
+            )
+            prev = index_pred[:, :, 0]
+            prefix_mean = prev
+            prefix_chain_res_steps = []
+            prefix_chain_gate_steps = []
+            for t in range(self.pred_time):
+                curr = index_pred[:, :, t]
+                step_in = torch.cat(
+                    [
+                        deep_ctx[:, t, :],
+                        mem_roll[:, t, :],
+                        curr,
+                        prev,
+                        prefix_mean,
+                        mem_pred[:, :, t],
+                        deep_pred[:, :, t],
+                    ],
+                    dim=-1,
+                )
+                h = self.prefix_chain_cell(self.prefix_chain_proj(step_in), h)
+                h = self.prefix_chain_norm(h)
+                step_res = self.prefix_chain_head(h)
+                step_gate = self.prefix_chain_gate(h)
+                prefix_chain_res_steps.append(step_res)
+                prefix_chain_gate_steps.append(step_gate)
+                step_term = torch.sigmoid(self.prefix_chain_scale) * step_res * step_gate
+                masked_term = step_term * self.prefix_chain_mask[:, :, t].to(index_pred.dtype)
+                curr_out = curr + masked_term
+                prev = curr_out.detach() if self.prefix_chain_detach_prev else curr_out
+                prefix_mean = prefix_mean + (curr_out - prefix_mean) / float(t + 2)
+
+            prefix_chain_res = torch.stack(prefix_chain_res_steps, dim=1).transpose(1, 2)
+            prefix_chain_gate = torch.stack(prefix_chain_gate_steps, dim=1).transpose(1, 2)
+            prefix_chain_term = (
+                torch.sigmoid(self.prefix_chain_scale)
+                * prefix_chain_res
+                * prefix_chain_gate
+                * self.prefix_chain_mask.to(index_pred.dtype)
+            )
+            index_pred = index_pred + prefix_chain_term
+
+        prefix_band_res = None
+        prefix_band_gate = None
+        if self.prefix_band_enabled:
+            curr_seq = index_pred.transpose(1, 2)
+            left_seq = torch.cat([curr_seq[:, :1, :], curr_seq[:, :-1, :]], dim=1)
+            right_seq = torch.cat([curr_seq[:, 1:, :], curr_seq[:, -1:, :]], dim=1)
+            prefix_denom = torch.arange(
+                1, self.pred_time + 1, device=index_pred.device, dtype=index_pred.dtype
+            ).view(1, self.pred_time, 1)
+            suffix_denom = torch.arange(
+                self.pred_time, 0, -1, device=index_pred.device, dtype=index_pred.dtype
+            ).view(1, self.pred_time, 1)
+            prefix_mean_seq = torch.cumsum(curr_seq, dim=1) / prefix_denom
+            suffix_mean_seq = torch.flip(torch.cumsum(torch.flip(curr_seq, dims=[1]), dim=1), dims=[1]) / suffix_denom
+            band_in = torch.cat(
+                [
+                    deep_ctx,
+                    mem_roll,
+                    curr_seq,
+                    left_seq,
+                    right_seq,
+                    prefix_mean_seq,
+                    suffix_mean_seq,
+                    deep_pred.transpose(1, 2),
+                ],
+                dim=-1,
+            )
+            ws = int(self.prefix_band_window_start)
+            we = int(self.prefix_band_window_end)
+            band_tokens = self.prefix_band_proj(band_in[:, ws:we, :])
+            band_hidden = self.prefix_band_mix(band_tokens)
+            band_res_local = self.prefix_band_head(band_hidden)
+            band_gate_local = self.prefix_band_gate(band_hidden)
+            prefix_band_res = torch.zeros_like(index_pred)
+            prefix_band_gate = torch.zeros_like(index_pred)
+            prefix_band_res[:, :, ws:we] = band_res_local.transpose(1, 2)
+            prefix_band_gate[:, :, ws:we] = band_gate_local.transpose(1, 2)
+            prefix_band_term = (
+                torch.sigmoid(self.prefix_band_scale)
+                * prefix_band_res
+                * prefix_band_gate
+                * self.prefix_band_mask.to(index_pred.dtype)
+            )
+            index_pred = index_pred + prefix_band_term
+
+        prefix_direct_pred = None
+        prefix_direct_gate = None
+        if self.prefix_direct_enabled:
+            curr_seq = index_pred.transpose(1, 2)
+            prefix_denom = torch.arange(
+                1, self.pred_time + 1, device=index_pred.device, dtype=index_pred.dtype
+            ).view(1, self.pred_time, 1)
+            prefix_mean_seq = torch.cumsum(curr_seq, dim=1) / prefix_denom
+            left_seq = torch.cat([curr_seq[:, :1, :], curr_seq[:, :-1, :]], dim=1)
+            init_month_f = init_month.to(index_pred.device, dtype=index_pred.dtype).view(-1, 1, 1)
+            lead_ids = torch.arange(
+                1, self.pred_time + 1, device=index_pred.device, dtype=index_pred.dtype
+            ).view(1, self.pred_time, 1)
+            target_month = torch.remainder(init_month_f - 1.0 + lead_ids, 12.0)
+            init_angle = init_month_f * (2.0 * math.pi / 12.0)
+            target_angle = target_month * (2.0 * math.pi / 12.0)
+            season_feat = torch.cat(
+                [
+                    torch.sin(target_angle),
+                    torch.cos(target_angle),
+                    torch.sin(init_angle).expand(-1, self.pred_time, -1),
+                    torch.cos(init_angle).expand(-1, self.pred_time, -1),
+                ],
+                dim=-1,
+            )
+            direct_in = torch.cat(
+                [
+                    deep_ctx,
+                    mem_roll,
+                    curr_seq,
+                    left_seq,
+                    prefix_mean_seq,
+                    mem_pred.transpose(1, 2),
+                    deep_pred.transpose(1, 2),
+                    season_feat,
+                ],
+                dim=-1,
+            )
+            ws = int(self.prefix_direct_window_start)
+            we = int(self.prefix_direct_window_end)
+            direct_tokens = self.prefix_direct_proj(direct_in[:, ws:we, :])
+            direct_hidden = self.prefix_direct_mix(direct_tokens)
+            direct_pred_local = self.prefix_direct_head(direct_hidden)
+            direct_gate_local = self.prefix_direct_gate(direct_hidden)
+            prefix_direct_pred = torch.zeros_like(index_pred)
+            prefix_direct_gate = torch.zeros_like(index_pred)
+            prefix_direct_pred[:, :, ws:we] = direct_pred_local.transpose(1, 2)
+            prefix_direct_gate[:, :, ws:we] = direct_gate_local.transpose(1, 2)
+            direct_alpha = (
+                torch.sigmoid(self.prefix_direct_scale)
+                * prefix_direct_gate
+                * self.prefix_direct_mask.to(index_pred.dtype)
+            )
+            if self.prefix_direct_mode in ("blend", "replace", "override"):
+                index_pred = index_pred + (prefix_direct_pred - index_pred) * direct_alpha
+            else:
+                index_pred = index_pred + prefix_direct_pred * direct_alpha
+
         hole_interp_res = None
         if self.hole_interp_enabled:
             interp_scale = torch.sigmoid(self.hole_interp_scale).to(index_pred.dtype).view(1, -1)
@@ -1370,12 +1956,80 @@ class ENSOX(nn.Module):
             )
             index_pred = index_pred + frontier_term
 
+        lead_mixer_res = None
+        if self.lead_mixer_enabled:
+            lead_mixer_res = self.lead_mixer(index_pred)
+            lead_mixer_term = (
+                torch.sigmoid(self.lead_mixer_scale)
+                * lead_mixer_res
+                * self.lead_mixer_mask.to(index_pred.dtype)
+            )
+            index_pred = index_pred + lead_mixer_term
+
+        base_index_pred = index_pred
+        warm_growth_res = None
+        warm_growth_gate = None
+        warm_event_logit = None
+        warm_peak_pred = None
+        warm_timing_logit = None
+        if self.warm_growth_enabled:
+            curr_seq = index_pred.transpose(1, 2)
+            prefix_denom = torch.arange(
+                1, self.pred_time + 1, device=index_pred.device, dtype=index_pred.dtype
+            ).view(1, self.pred_time, 1)
+            suffix_denom = torch.arange(
+                self.pred_time, 0, -1, device=index_pred.device, dtype=index_pred.dtype
+            ).view(1, self.pred_time, 1)
+            prefix_mean_seq = torch.cumsum(curr_seq, dim=1) / prefix_denom
+            suffix_mean_seq = torch.flip(torch.cumsum(torch.flip(curr_seq, dims=[1]), dim=1), dims=[1]) / suffix_denom
+            warm_in = torch.cat(
+                [
+                    deep_ctx,
+                    mem_roll,
+                    curr_seq,
+                    prefix_mean_seq,
+                    suffix_mean_seq,
+                    mem_pred.transpose(1, 2),
+                    deep_pred.transpose(1, 2),
+                ],
+                dim=-1,
+            )
+            ws = int(self.warm_growth_window_start)
+            we = int(self.warm_growth_window_end)
+            warm_tokens = self.warm_growth_proj(warm_in[:, ws:we, :])
+            warm_hidden, _ = self.warm_growth_rnn(warm_tokens)
+            warm_hidden = self.warm_growth_norm(warm_hidden)
+            warm_res_local = self.warm_growth_head(warm_hidden)
+            warm_gate_local = self.warm_growth_gate(warm_hidden)
+            warm_growth_res = torch.zeros_like(index_pred)
+            warm_growth_gate = torch.zeros_like(index_pred)
+            warm_growth_res[:, :, ws:we] = warm_res_local.transpose(1, 2)
+            warm_growth_gate[:, :, ws:we] = warm_gate_local.transpose(1, 2)
+            warm_term = (
+                torch.sigmoid(self.warm_growth_scale)
+                * warm_growth_res
+                * warm_growth_gate
+                * self.warm_growth_mask.to(index_pred.dtype)
+            )
+            index_pred = index_pred + warm_term
+
+            warm_mean = warm_hidden.mean(dim=1)
+            warm_max = warm_hidden.amax(dim=1)
+            warm_context = self.warm_context_norm(torch.cat([warm_mean, warm_max], dim=-1))
+            warm_event_logit = self.warm_event_head(warm_context)
+            warm_peak_raw = self.warm_peak_head(warm_context)
+            warm_peak_pred = torch.clamp(F.softplus(warm_peak_raw) - 0.6931471805599453, min=0.0)
+            warm_timing_logit = self.warm_timing_head(warm_context)
+
         return {
             "index_pred": index_pred,
+            "base_index_pred": base_index_pred,
             "memory_index_pred": mem_pred,
             "deep_index_pred": deep_pred,
             "gate": gate,
             "memory_feature_pred": mem_feat_pred,
+            "regional_ridge_pred": regional_ridge_pred,
+            "legal_analog_pred": legal_analog_pred,
             "long_residual": long_res,
             "long_gate": long_gate,
             "barrier_residual": barrier_res,
@@ -1394,11 +2048,23 @@ class ENSOX(nn.Module):
             "barrier_bridge_gate": barrier_bridge_gate,
             "prefix_bridge_residual": prefix_bridge_res,
             "prefix_bridge_gate": prefix_bridge_gate,
+            "prefix_chain_residual": prefix_chain_res,
+            "prefix_chain_gate": prefix_chain_gate,
+            "prefix_band_residual": prefix_band_res,
+            "prefix_band_gate": prefix_band_gate,
+            "prefix_direct_pred": prefix_direct_pred,
+            "prefix_direct_gate": prefix_direct_gate,
             "hole_interp_residual": hole_interp_res,
             "hole_patch_residual": hole_patch_res,
             "hole_patch_gate": hole_patch_gate,
             "frontier_refiner_residual": frontier_res,
             "frontier_refiner_gate": frontier_gate,
+            "lead_mixer_residual": lead_mixer_res,
+            "warm_growth_residual": warm_growth_res,
+            "warm_growth_gate": warm_growth_gate,
+            "warm_event_logit": warm_event_logit,
+            "warm_peak_pred": warm_peak_pred,
+            "warm_timing_logit": warm_timing_logit,
         }
 
 

@@ -9,15 +9,16 @@ venv/
 .env
 
 # Local data and outputs
-data/
+/data/
 outputs/
 
 # Checkpoint binaries
-checkpoints/*.ckpt
-checkpoints/*/*.ckpt
-checkpoints/*/*.pth
-checkpoints/*/*.pt
-checkpoints/*/*.bin
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.bin
+*.npz
 
 # Runtime logs and temp files
 *.log
