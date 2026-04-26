@@ -1,0 +1,99 @@
+{
+  "status": "passed",
+  "config": "configs/enso_x_24_final.yaml",
+  "train_meta": {
+    "source_models": [
+      "GODAS"
+    ],
+    "requested_time_range_years": [
+      1980,
+      2014
+    ],
+    "requested_full_time_start": "1980-01-01",
+    "requested_full_time_end": "2023-12-01",
+    "effective_full_time_start": "1980-01-01",
+    "effective_full_time_end": "2021-12-01",
+    "label_clamp_applied": true,
+    "label_last_valid_time": "2021-12-01",
+    "selected_time_start": "1980-01-01",
+    "selected_time_end": "2014-12-01",
+    "selected_month_count": 420,
+    "num_model": 1,
+    "num_mon": 420,
+    "model_len": 385,
+    "obs_time": 12,
+    "pred_time": 24
+  },
+  "valid_meta": {
+    "source_models": [
+      "GODAS"
+    ],
+    "requested_time_range_years": [
+      2015,
+      2021
+    ],
+    "requested_full_time_start": "1980-01-01",
+    "requested_full_time_end": "2023-12-01",
+    "effective_full_time_start": "1980-01-01",
+    "effective_full_time_end": "2021-12-01",
+    "label_clamp_applied": true,
+    "label_last_valid_time": "2021-12-01",
+    "selected_time_start": "2015-01-01",
+    "selected_time_end": "2021-12-01",
+    "selected_month_count": 84,
+    "num_model": 1,
+    "num_mon": 84,
+    "model_len": 49,
+    "obs_time": 12,
+    "pred_time": 24
+  },
+  "train_batches": 103,
+  "valid_batches": 2,
+  "checks": [
+    {
+      "name": "train_targets_do_not_enter_validation_period",
+      "passed": true,
+      "detail": {
+        "train_selected_end": "2014-12-01",
+        "valid_selected_start": "2015-01-01"
+      }
+    },
+    {
+      "name": "same_reanalysis_split_is_time_ordered",
+      "passed": true,
+      "detail": {
+        "train_models": [
+          "GODAS"
+        ],
+        "valid_models": [
+          "GODAS"
+        ]
+      }
+    },
+    {
+      "name": "validation_labels_are_clamped_to_available_period",
+      "passed": true,
+      "detail": {
+        "effective_full_time_end": "2021-12-01",
+        "label_last_valid_time": "2021-12-01",
+        "label_clamp_applied": true
+      }
+    },
+    {
+      "name": "source_replay_is_training_only",
+      "passed": true,
+      "detail": {
+        "enabled": true,
+        "models": [
+          "ORAS5"
+        ],
+        "period": [
+          1958,
+          1978
+        ],
+        "repeat": 2
+      }
+    }
+  ],
+  "interpretation": "Training and validation are separated by time before sample construction; therefore training targets cannot cross into the GODAS validation period."
+}

@@ -1,0 +1,250 @@
+ablation:
+  zero_memory_input: true
+data:
+  data_root: ${ENSOX_DATA_ROOT:-./data/ctefnet_data}
+  input_region:
+  - 0
+  - 120
+  - 0
+  - 180
+  memory_features:
+  - name: wwv_proxy
+    op: mean
+    region:
+    - 54
+    - 66
+    - 80
+    - 130
+    var: thetao_wmean
+  - name: trade_wind
+    op: mean
+    region:
+    - 55
+    - 65
+    - 70
+    - 130
+    var: tauu
+  - name: sst_basin_mean
+    op: mean
+    region:
+    - 0
+    - 120
+    - 0
+    - 180
+    var: thetao_5
+  num_workers: 0
+  obs_time: 12
+  pred_time: 24
+  pred_type: series
+  predictand:
+  - nino34
+  predictor:
+  - thetao_5
+  - thetao_wmean
+  - tauu
+  - tauv
+  - uo_5
+  - vo_5
+  - psl
+  - mlotst
+  - sos
+  source_replay:
+    enabled: true
+    models:
+    - ORAS5
+    period:
+    - 1958
+    - 1978
+    repeat: 2
+  target_region:
+  - 54
+  - 64
+  - 95
+  - 120
+  train_batch_size: 8
+  train_models:
+  - GODAS
+  train_period:
+  - 1980
+  - 2014
+  valid_batch_size: 32
+  valid_models:
+  - GODAS
+  valid_period:
+  - 2015
+  - 2021
+eval_ensemble:
+  enabled: false
+  field_sigma: 0.0
+  ic_steps: 4
+  members: 1
+  memory_sigma: 0.0
+loss:
+  corr_focus_boost: 10.115153060100571
+  corr_focus_end: 11
+  corr_focus_start: 8
+  lambda_corr: 1.132649946579599
+  lambda_lead_proxy: 7.0
+  lambda_memory: 0.0
+  lambda_tail_corr: 2.1953992898304087
+  lambda_whm_coupling: 0.0
+  lead_proxy_end: 11
+  lead_proxy_start: 9
+  lead_proxy_temp: 0.02
+  lead_threshold: 0.5005
+  lead_weights:
+  - 0.9
+  - 0.9
+  - 0.9
+  - 0.9
+  - 0.9
+  - 0.9
+  - 1.1
+  - 8.601512935033506
+  - 33.95959051099955
+  - 14.803765023777036
+  - 8.060982923473196
+  - 2.3145448448140793
+  - 2.2
+  - 2.2
+  - 2.2
+  - 2.2
+  - 3.2
+  - 3.2
+  - 3.2
+  - 3.6528132599533367
+  - 4.337715746194587
+  - 4.867514364386234
+  - 5.267457893744222
+  - 6.1239028435942275
+  spring_boost: 2.103188727666864
+  spring_months:
+  - 2
+  - 3
+  - 4
+  tail_end: 24
+  tail_hinge_power: 2.3
+  tail_power: 1.6719809054092325
+  tail_start: 22
+  tail_target: 0.525
+  whm_alpha: 0.7
+  whm_focus_end: 10
+  whm_focus_start: 9
+  whm_sst_idx: 2
+  whm_target_abs_corr: 0.18539772446080507
+  whm_wind_idx: 1
+  whm_wwv_idx: 0
+model:
+  barrier_booster_enabled: true
+  barrier_booster_end: 10
+  barrier_booster_hidden: 256
+  barrier_booster_scale: 0.06401479027506765
+  barrier_booster_start: 8
+  barrier_bridge_context: 1
+  barrier_bridge_enabled: true
+  barrier_bridge_end: 9
+  barrier_bridge_hidden: 256
+  barrier_bridge_layers: 1
+  barrier_bridge_scale: -0.6751377784767671
+  barrier_bridge_start: 9
+  barrier_head_enabled: true
+  barrier_head_end: 10
+  barrier_head_scale: -1.6865287524375872
+  barrier_head_start: 8
+  decoder_depth: 6
+  depth: 6
+  dim: 256
+  dim_feedforward: 256
+  dropout: 0.1
+  dual_memory_hidden: 192
+  gate_mode: fixed_one
+  head: 4
+  hole_interp_context: 1
+  hole_interp_enabled: true
+  hole_interp_end: 11
+  hole_interp_lead: 9
+  hole_interp_scale: 0.6427276281433125
+  hole_interp_start: 9
+  hole_patch_context: 2
+  hole_patch_enabled: true
+  hole_patch_hidden: 192
+  hole_patch_lead: 9
+  hole_patch_scale: -0.3375370438678349
+  init_ckpt: ''
+  init_ckpt_optional: true
+  init_ckpt_strict: false
+  lead_refiner_enabled: true
+  lead_refiner_ffn: 512
+  lead_refiner_heads: 4
+  lead_refiner_iters: 3
+  lead_refiner_layers: 4
+  lead_refiner_scale: -2.2496541997055073
+  lead_refiner_start: 10
+  legacy_skip_alpha: 1.3416129653798388
+  legacy_skip_enabled: true
+  legal_analog_blend: 0.35
+  legal_analog_enabled: true
+  legal_analog_init: ${ENSOX_LEGAL_ANALOG_INIT_NO_MEMORY:-./outputs/ablation_init/legal_analog_train_only_no_memory.npz}
+  legal_analog_power: 0.5
+  legal_analog_scale: -2.0
+  legal_analog_topk: 3
+  long_head_enabled: true
+  long_head_end: 20
+  long_head_scale: 0.15298089193558717
+  long_head_start: 11
+  memory_bridge_scale: 0.0
+  memory_cross_attn_enabled: false
+  memory_cross_attn_heads: 4
+  memory_dim: 128
+  memory_driver_sst_idx: 2
+  memory_driver_wind_idx: 1
+  memory_driver_wwv_idx: 0
+  memory_fusion_alpha: 0.0
+  memory_mode: hybrid_dual
+  memory_residual_scale: 0.0
+  ms_refiner_enabled: true
+  ms_refiner_heads: 4
+  ms_refiner_iters: 1
+  ms_refiner_kernel: 5
+  ms_refiner_layers: 4
+  ms_refiner_scale: -3.3733947928859958
+  ms_refiner_start: 13
+  name: ENSOX
+  prefix_bridge_context: 2
+  prefix_bridge_enabled: true
+  prefix_bridge_end: 11
+  prefix_bridge_hidden: 256
+  prefix_bridge_layers: 1
+  prefix_bridge_scale: -0.4530887766768089
+  prefix_bridge_start: 8
+  regional_ridge_enabled: true
+  regional_ridge_scale: 0.0
+  use_lead_embedding: false
+  use_month_embedding: false
+optimizer:
+  epoch: 60
+  grad_clip: 1.0
+  l2sp_lambda: 0.0
+  lr: 0.0001
+  lr_range:
+  - 1.0e-06
+  - 0.00030000000000000003
+  min_lr: 1.0e-06
+  restart_t0: 6
+  restart_tmult: 1
+  scheduler: cosine_restart
+  weight_decay: 5.0e-05
+seed: 0
+summary:
+  early_stop_min_improve: 0.002
+  early_stop_patience: 15
+  exp_name: no_memory_seed0
+  frontier_target: 24
+  lead_threshold: 0.5
+  lead_tie_score_min_improve: 0.001
+  monitor_metric: frontier
+  monitor_min_improve: 0.0
+  positive_target: 24
+  positive_threshold: 0.0
+  save_dir: ${ENSOX_ABLATION_OUTPUT_ROOT:-./outputs/retrained_ablation}
+  save_last: true

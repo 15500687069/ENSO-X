@@ -8,7 +8,7 @@ ENSO-X is an independently designed model for long-lead ENSO prediction under a 
 - **Continuous 24-month skill**: the released GODAS checkpoint reaches `24/24` lead months with `corr > 0.5` on `GODAS 2015-2021`.
 - **Physical memory design**: the memory branch uses warm-water-volume, trade-wind, and basin-mean SST proxies to represent recharge, wind forcing, and persistence.
 - **Ablation-tested repair design**: removing the memory input reduces the continuous GODAS skill frontier from 24 to 21 months, while removing the final reanalysis-consistent repair layer reduces it from 24 to 6 months.
-- **Extreme-event improvement**: strong warm-event amplitude is no longer systematically underestimated in the main GODAS validation, and an optional extreme-event calibration experiment further improves warm/cold event recall while keeping 24-month skill.
+- **Extreme-event diagnosis**: strong warm-event amplitude is no longer systematically underestimated in the main GODAS validation; stricter split-calibration scripts are included for conservative event-repair testing.
 
 ## Model Overview
 
@@ -56,7 +56,7 @@ Extreme-event summary on `GODAS 2015-2021`:
 
 - main checkpoint warm-event amplitude bias: `+0.031`
 - warm-event recall: `0.667`
-- optional calibration keeps `24/24` lead skill and improves warm-event recall to `0.889`
+- diagnostic same-period calibration can improve event recall, but the stricter train-period calibration split currently selects no extra gain and should be treated as the conservative result
 
 ## Ablation Results
 
@@ -78,6 +78,8 @@ Component conclusions:
 - The final lead-repair contribution is dominated by the reanalysis-consistent analog repair layer; local patch/refiner modules are retained as stabilizers but are not the main source of the released 24-month skill.
 - The optional extreme-event calibration improves event recall and F1 while keeping all 24 lead correlations above 0.5, but it should be reported separately from the default deterministic checkpoint because it increases event amplitude.
 
+The table above is a single-checkpoint intervention ablation. For a stricter paper-style protocol, this repository also includes retrained multi-seed ablation configs and scripts. Those runs train each ablated variant under the same data split and then summarize mean/std across seeds.
+
 The same ablation script also includes an ORAS5 replay-domain consistency check. ORAS5 is used here only to test replay-domain behavior, not as a replacement for the main GODAS validation.
 
 ## Repository Layout
@@ -85,11 +87,17 @@ The same ablation script also includes an ORAS5 replay-domain consistency check.
 - `train.py`: training entry point
 - `src/ensox/`: ENSO-X model, loss, metrics, and utilities
 - `configs/enso_x_24_final.yaml`: main reproducible configuration
+- `configs/ablation_retrain/`: multi-seed retrained ablation configurations
 - `preprocess/preprocess_godas_to_ensox.py`: GODAS preprocessing
 - `preprocess/preprocess_oras5_to_ensox.py`: ORAS5 preprocessing
 - `scripts/evaluate_extreme_enso_x.py`: extreme-event evaluation
 - `scripts/evaluate_probabilistic_enso_x.py`: probabilistic pilot evaluation
 - `scripts/evaluate_ablation_enso_x.py`: component ablation evaluation
+- `scripts/audit_data_leakage_enso_x.py`: data-split and label-clamp audit
+- `scripts/build_legal_analog_init.py`: train-period-only analog repair initializer
+- `scripts/run_retrained_ablation.sh`: multi-seed retrained ablation launcher
+- `scripts/summarize_retrained_ablation.py`: retrained ablation mean/std summary
+- `scripts/evaluate_extreme_calibration_split_enso_x.py`: split-based extreme-event calibration test
 - `scripts/run_train_enso_x.sh`: training launcher
 - `results/`: sanitized release summaries
 
@@ -122,6 +130,14 @@ python scripts/evaluate_ablation_enso_x.py \
   --data-root "$ENSOX_DATA_ROOT" \
   --output-json results/enso_x_ablation_godas_oras5_20260426.json \
   --tags GODAS_2015_2021 ORAS5_1958_1978
+```
+
+Run the stricter retrained ablation protocol:
+
+```bash
+export ENSOX_DATA_ROOT=/path/to/data/ctefnet_data
+export ENSOX_ABLATION_OUTPUT_ROOT=/path/to/ablation_runs
+bash scripts/run_retrained_ablation.sh
 ```
 
 ## Contact

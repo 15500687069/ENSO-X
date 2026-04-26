@@ -333,6 +333,7 @@ def train_one_epoch(
     anchor_params=None,
     l2sp_lambda=0.0,
     augment_cfg=None,
+    ablation_cfg=None,
 ):
     model.train()
     meter = AverageMeter()
@@ -343,6 +344,7 @@ def train_one_epoch(
         m_future = m_future.to(device, non_blocking=True)
         init_month = init_month.to(device, non_blocking=True)
         x_field, m_hist = apply_train_augmentation(x_field, m_hist, augment_cfg)
+        x_field, m_hist = apply_ablation_inputs(x_field, m_hist, ablation_cfg)
 
         optimizer.zero_grad(set_to_none=True)
         with autocast(enabled=(device.type == "cuda")):
@@ -446,6 +448,17 @@ def _dataset_metadata(dataset):
     if isinstance(meta, dict):
         return dict(meta)
     return {}
+
+
+def apply_ablation_inputs(x_field, m_hist, ablation_cfg):
+    """Apply controlled input ablations consistently during train/eval."""
+    if not isinstance(ablation_cfg, dict):
+        return x_field, m_hist
+    if _as_bool(ablation_cfg.get("zero_memory_input", False), default=False):
+        m_hist = torch.zeros_like(m_hist)
+    if _as_bool(ablation_cfg.get("zero_field_input", False), default=False):
+        x_field = torch.zeros_like(x_field)
+    return x_field, m_hist
 
 
 def _remap_legacy_ctefnet_state(state, model_state):
@@ -782,7 +795,7 @@ def build_trainable_param_groups(model, opt_cfg, base_lr, weight_decay):
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion, device, pred_time, eval_cfg=None):
+def evaluate(model, loader, criterion, device, pred_time, eval_cfg=None, ablation_cfg=None):
     model.eval()
     meter = AverageMeter()
     preds = []
@@ -803,6 +816,7 @@ def evaluate(model, loader, criterion, device, pred_time, eval_cfg=None):
         m_hist = m_hist.to(device, non_blocking=True)
         m_future = m_future.to(device, non_blocking=True)
         init_month = init_month.to(device, non_blocking=True)
+        x_field, m_hist = apply_ablation_inputs(x_field, m_hist, ablation_cfg)
 
         if ens_members == 1:
             outputs = model(x_field, m_hist, init_month)
@@ -924,6 +938,9 @@ def main():
     out_cfg = cfg.get("summary", {})
     eval_cfg = cfg.get("eval_ensemble", {})
     augment_cfg = cfg.get("augmentation", {})
+    ablation_cfg = cfg.get("ablation", {})
+    if isinstance(ablation_cfg, dict) and ablation_cfg:
+        print("[Train] ablation:", json.dumps(ablation_cfg, ensure_ascii=False, sort_keys=True))
     if isinstance(augment_cfg, dict) and _as_bool(augment_cfg.get("enabled", False), default=False):
         print("[Train] augmentation enabled:", json.dumps(augment_cfg, ensure_ascii=False, sort_keys=True))
     save_dir = os.path.join(ROOT, out_cfg.get("save_dir", "checkpoints"), out_cfg.get("exp_name", "enso_x"))
@@ -1038,6 +1055,7 @@ def main():
             anchor_params=anchor_params,
             l2sp_lambda=l2sp_lambda,
             augment_cfg=augment_cfg,
+            ablation_cfg=ablation_cfg,
         )
         valid_loss, score, corr, leading = evaluate(
             model,
@@ -1046,6 +1064,7 @@ def main():
             device,
             pred_time,
             eval_cfg=eval_cfg,
+            ablation_cfg=ablation_cfg,
         )
         corr_stats = _corr_metrics(
             corr,
@@ -1200,6 +1219,7 @@ def main():
         "early_stop_patience": int(early_stop_patience),
         "train_data_meta": train_dataset_meta,
         "valid_data_meta": valid_dataset_meta,
+        "ablation": ablation_cfg if isinstance(ablation_cfg, dict) else {},
     }
     if best_lead_corr is not None:
         summary["best_lead_corr"] = np.asarray(best_lead_corr).tolist()
