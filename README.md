@@ -64,13 +64,13 @@ Systematic ablation is evaluated on the released checkpoint using the same `GODA
 
 | Variant | Frontier | Min corr | Mean corr | Warm F1 | Cold F1 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Full ENSO-X | 24 | 0.5129 | 0.6784 | 0.387 | 0.083 |
-| No memory input | 21 | 0.4986 | 0.6791 | 0.387 | 0.091 |
-| Field branch only | 0 | -0.1465 | 0.3291 | 0.000 | 0.419 |
-| No local lead repair | 24 | 0.5126 | 0.6760 | 0.400 | 0.083 |
-| No legal analog repair | 15 | 0.3572 | 0.6386 | 0.400 | 0.400 |
-| No reanalysis repair | 6 | 0.2851 | 0.4809 | 0.310 | 0.000 |
-| Extreme calibrated | 24 | 0.5062 | 0.6735 | 0.485 | 0.485 |
+| Full ENSO-X | 24 | 0.5099 | 0.6728 | 0.414 | 0.083 |
+| No memory input | 21 | 0.4936 | 0.6743 | 0.414 | 0.087 |
+| Field branch only | 0 | -0.3277 | 0.3002 | 0.000 | 0.419 |
+| No local lead repair | 24 | 0.5097 | 0.6726 | 0.400 | 0.083 |
+| No legal analog repair | 15 | 0.3546 | 0.6363 | 0.400 | 0.400 |
+| No reanalysis repair | 7 | 0.2479 | 0.4604 | 0.310 | 0.000 |
+| Extreme calibrated | 24 | 0.5036 | 0.6672 | 0.500 | 0.457 |
 
 Component conclusions:
 
@@ -78,7 +78,7 @@ Component conclusions:
 - The final lead-repair contribution is dominated by the reanalysis-consistent analog repair layer; local patch/refiner modules are retained as stabilizers but are not the main source of the released 24-month skill.
 - The optional extreme-event calibration improves event recall and F1 while keeping all 24 lead correlations above 0.5, but it should be reported separately from the default deterministic checkpoint because it increases event amplitude.
 
-The table above is a single-checkpoint intervention ablation. For a stricter paper-style protocol, this repository also includes retrained multi-seed ablation configs and scripts. Those runs train each ablated variant under the same data split and then summarize mean/std across seeds.
+The table above is a single-checkpoint intervention ablation with a train-period-only legal analog initializer (`GODAS 1980-2014` plus ORAS5 replay, `pca_dim=128`, `ridge_alpha=0.1`). For a stricter paper-style protocol, this repository also includes retrained multi-seed ablation configs and scripts. Those runs train each ablated variant under the same data split and then summarize mean/std across seeds.
 
 The same ablation script also includes an ORAS5 replay-domain consistency check. ORAS5 is used here only to test replay-domain behavior, not as a replacement for the main GODAS validation.
 

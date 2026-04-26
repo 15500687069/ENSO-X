@@ -12,7 +12,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from train import build_dataloaders, build_model, load_init_checkpoint, load_yaml_config, weighted_skill_np
+from train import (
+    build_dataloaders,
+    build_model,
+    load_init_checkpoint,
+    load_legal_analog_init,
+    load_regional_ridge_init,
+    load_yaml_config,
+    weighted_skill_np,
+)
 
 
 LEAD_REPAIR_FLAGS = [
@@ -42,6 +50,8 @@ def parse_args():
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--output-json", required=True)
     parser.add_argument("--tags", nargs="+", default=["GODAS_2015_2021"])
+    parser.add_argument("--legal-analog-init", default="")
+    parser.add_argument("--regional-ridge-init", default="")
     parser.add_argument("--event-quantile", type=float, default=0.8)
     parser.add_argument("--timing-tolerance", type=int, default=2)
     parser.add_argument("--extreme-gain", type=float, default=2.0)
@@ -62,6 +72,10 @@ def runtime_cfg(base_cfg, args, spec):
     cfg["model"]["init_ckpt"] = args.ckpt
     cfg["model"]["init_ckpt_optional"] = False
     cfg["model"]["init_ckpt_strict"] = False
+    if args.legal_analog_init:
+        cfg["model"]["legal_analog_init"] = args.legal_analog_init
+    if args.regional_ridge_init:
+        cfg["model"]["regional_ridge_init"] = args.regional_ridge_init
     cfg["data"]["data_root"] = args.data_root
     cfg["data"]["num_workers"] = 0
     cfg["data"]["source_replay"] = {"enabled": False}
@@ -305,6 +319,8 @@ def main():
         _, valid_loader, train_dataset = build_dataloaders(cfg)
         model = build_model(cfg, memory_dim=train_dataset.memory_dim).to(device)
         load_init_checkpoint(model, cfg.get("model", {}))
+        load_regional_ridge_init(model, cfg.get("model", {}))
+        load_legal_analog_init(model, cfg.get("model", {}))
         model.eval()
 
         rows = []
