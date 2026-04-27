@@ -54,6 +54,7 @@ Released GODAS checkpoint on `GODAS 2015-2021`:
 ## Repository Layout
 
 - `train.py`: training entry point
+- `RESULTS.md`: concise released-result summary
 - `src/ensox/`: ENSO-X model, loss, metrics, and utilities
 - `configs/enso_x_24_final.yaml`: main reproducible configuration
 - `configs/ablation_retrain/`: multi-seed retrained ablation configurations
